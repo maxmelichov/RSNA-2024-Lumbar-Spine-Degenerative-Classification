@@ -2,3 +2,4 @@
 /train_images
 /venv
 *.zip
+*.ipynb
