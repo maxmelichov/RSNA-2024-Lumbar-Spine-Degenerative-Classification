@@ -1,31 +1,20 @@
 import numpy as np 
-import pandas as pd 
-import os
-from pathlib import Path
 from PIL import Image
 from matplotlib.patches import Rectangle
 
-from sklearn.model_selection import KFold
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
-from torch.utils.data import Dataset
 
 from segmentation_models_pytorch import Unet
-from tqdm import tqdm
 
 import numpy as np 
-import pandas as pd 
 import os
-from pathlib import Path
 from PIL import Image
 from matplotlib.patches import Rectangle
+import matplotlib.pyplot as plt
 
-from sklearn.model_selection import KFold
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.utils.data import Dataset
 import pydicom
 
 import albumentations as A
@@ -33,7 +22,12 @@ from albumentations.pytorch import ToTensorV2
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
-
+label_dict_clean = {1 : 'L5', 2 : 'L4', 3 : 'L3', 4 : 'L2', 5 : 'L1', 6 : 'T12',
+                7 : 'unknown', 8 : 'unknown', 9 : 'unknown',
+                10: 'spinal canal', 11: 'L5-S1', 12: 'L4-L5', 13: 'L3-L4',
+                14: 'L2-L3', 15: 'L1-L2', 16: 'T12-L1',
+                17: 'unknown', 18: 'unknown', 19: 'unknown'
+             }
 label_dict = {1 : '1: L5', 2 : '2: L4', 3 : '3: L3', 4 : '4: L2', 5 : '5: L1', 6 : '6: T12',
                 7 : '7: unknown', 8 : '8: unknown', 9 : '9: unknown',
                 10: '10: spinal canal', 11: '11: L5-S1', 12: '12: L4-L5', 13: '13: L3-L4',
@@ -42,7 +36,7 @@ label_dict = {1 : '1: L5', 2 : '2: L4', 3 : '3: L3', 4 : '4: L2', 5 : '5: L1', 6
              }
 
 
-classes_of_interest = [1, 2, 3, 4, 5, 11, 12, 13, 14, 15] # 1 is L5, 5 is L1, 11 is L5-S1, 15 is L1-L2
+classes_of_interest = [1, 2, 3, 4, 5] # 1 is L5, 5 is L1, 11 is L5-S1, 15 is L1-L2
 
 class SegmentaionInference:
     def __init__(self, model_path):
@@ -128,10 +122,9 @@ class SegmentaionInference:
                     x_max, y_max = np.max(coordinates, axis=0)
                     width = x_max - x_min
                     height = y_max - y_min
-                    class_bboxes[class_id].append((x_min, y_min, width, height))
+                    class_bboxes[class_id].append((y_min, x_min, height, width)) # I swapped x and y to match the format of the bounding boxes
                 else:
                     class_bboxes[class_id].append((-1, -1, -1, -1))  # Placeholder for classes not present in the mask
-        print(class_bboxes)
         scaled_bboxes = scale_bboxes(class_bboxes, self.original_image.shape , (256, 256))
         return scaled_bboxes
     
@@ -139,3 +132,28 @@ class SegmentaionInference:
         pred = self.predict_mask(dcm_path)
         bboxes = self.get_class_bboxes(pred, classes_of_interest)
         return bboxes
+    
+    @staticmethod
+    def visualize_dicom_with_labels(dicom_path, bboxes, classes_of_interest):
+    
+    
+        image = pydicom.dcmread(dicom_path).pixel_array
+        image = Image.fromarray(image)
+        if image.mode != 'RGB':  # Ensure image is RGB
+            image = image.convert('RGB')
+        image = np.asarray(image)
+        
+        plt.figure(figsize=(5, 5))
+        plt.imshow(image, cmap='gray')
+        
+        for class_id in classes_of_interest:
+            bbox = bboxes[class_id][0]  # Assuming single image
+            if bbox != (-1, -1, -1, -1):  # Check if the class is present
+                x, y, w, h = bbox
+                plt.gca().add_patch(Rectangle((x, y), w, h, linewidth=2, edgecolor='red', facecolor='none'))
+                plt.scatter(x, y, color='blue', s=100, marker='x')
+                plt.text(x, y, label_dict[class_id], color='white', fontsize=12, bbox=dict(facecolor='red', alpha=0.5))
+        
+        plt.title("DICOM Image with Bounding Boxes and Labels")
+        plt.axis('off')
+        plt.show()
