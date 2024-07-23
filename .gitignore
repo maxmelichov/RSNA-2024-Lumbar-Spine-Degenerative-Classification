@@ -4,3 +4,5 @@
 *.zip
 *.ipynb
 /CADDM_master
+*.dcm
+*.pyc

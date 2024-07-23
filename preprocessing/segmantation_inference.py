@@ -36,7 +36,7 @@ label_dict = {1 : '1: L5', 2 : '2: L4', 3 : '3: L3', 4 : '4: L2', 5 : '5: L1', 6
              }
 
 
-classes_of_interest = [1, 2, 3, 4, 5] # 1 is L5, 5 is L1, 11 is L5-S1, 15 is L1-L2
+classes_of_interest = [11, 12, 13, 14, 15]
 
 class SegmentaionInference:
     def __init__(self, model_path):

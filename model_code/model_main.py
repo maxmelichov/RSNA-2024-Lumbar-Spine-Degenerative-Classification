@@ -16,7 +16,6 @@ from tqdm import tqdm
 import numpy as np
 import statistics
 import torch.nn as nn
-sys.path.append(os.path.dirname(r"code\py"))
 import model_code.custom_model as custom_model
 import matplotlib.pyplot as plt
 import torch.optim
@@ -28,7 +27,7 @@ from typing import Any
 from tensorboardX import SummaryWriter
 from torch.nn import DataParallel
 import time
-
+from network.vit_16_base_feat_middle_gal_v2 import vit_base_patch16_224
 import json
 import torch.nn.functional as F
 
@@ -132,8 +131,8 @@ class Abstract(ABC):
             tuple[Path, Path]: The paths to the training and validation CSV files.
         """
         project_path = os.path.dirname(os.path.dirname(os.getcwd()))
-        dir_csv_train = os.path.join(r"D:\Raincheck\FAS\Video-Detection\code\TwoD_model\using_batch_as_dimension\csvs\train_raw_20.csv")
-        dir_csv_val = os.path.join(r"D:\Raincheck\FAS\Video-Detection\code\TwoD_model\using_batch_as_dimension\csvs\validation_raw_20.csv")
+        dir_csv_train = os.path.join(r"csvs/train_data.csv")
+        dir_csv_val = os.path.join(r"csvs/val_data.csv")
         return dir_csv_train, dir_csv_val
 
 
@@ -146,7 +145,7 @@ class Abstract(ABC):
             Path: The path to the test CSV file.
         """
         project_path = os.path.dirname(os.path.dirname(os.getcwd()))
-        dir_csv_test = os.path.join(r"D:\Raincheck\FAS\Video-Detection\code\TwoD_model\using_batch_as_dimension\csvs\test_raw_20.csv")
+        dir_csv_test = os.path.join(r"csvs/test_data.csv")
         return dir_csv_test
 
 
@@ -210,6 +209,8 @@ class Abstract(ABC):
             torch.optim.lr_scheduler.ReduceLROnPlateau: The learning rate scheduler.
         """
         return torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode=mode, factor=factor, patience=patience, threshold=threshold, verbose=True)
+
+
     @staticmethod
     def confident_strategy(pred, t:float = 0.5, batch_size: int = 32):
         pred = np.array(pred)
@@ -242,23 +243,31 @@ class Abstract(ABC):
         with torch.no_grad():
             validation_batch_losses = []
             progress_bar = tqdm(val_loader, desc='Validation', leave=False)
+            y_list, y_pred_list = [], []
             for iter_num, (raw, labels) in enumerate(progress_bar):
-                raw = raw.to(device)
+                raw = raw.cuda()
                 img_label = np.array(labels)
-                labels = labels.to(device).to(torch.float)
+                labels = labels.cuda().to(torch.float)
                 step = iter_num / max_iter
                 outputs, _, _ = self.model(raw, step=step, attn_blk=self.opt.attn_blk, feat_blk=self.opt.feat_blk, k=self.opt.k_weight, thr=self.opt.k_thr)
-                output_pred = F.softmax(outputs, dim=1).cpu().data.numpy()[:, 1]
+                output_pred = torch.argmax(F.softmax(outputs, dim=1).cpu().data, dim=1)
                 predicted = np.round(output_pred)
-                predicted = torch.tensor(Abstract.confident_strategy(predicted))
-                y = torch.argmax(torch.tensor(img_label), dim=1)[0]
+                y = torch.argmax(torch.tensor(img_label), dim=1)
+                y_list.append(y)
+                y_pred_list.append(predicted)
                 correct += torch.sum(predicted.eq(y)).item()
                 loss = loss_fn(outputs, labels)
                 validation_batch_losses.append(float(loss))
                 mean_loss = statistics.mean(validation_batch_losses)
-                number_steps += 1
+                number_steps += 32
                 progress_bar.set_postfix({'acc':100 * (correct / number_steps)})
         val_acc = 100 * (correct / number_steps)
+        print("Validation Accuracy: ", 100 * accuracy_score(y_list, y_pred_list))
+        print("Validation Loss: ", mean_loss)
+        print("Validation Precision: ", 100 * precision_score(y_list, y_pred_list, labels=[0,1]))
+        print("Validation Recall: ", 100 * recall_score(y_list, y_pred_list, labels=[0,1]))
+        print("Validation F1 Score: ", 100 * f1_score(y_list, y_pred_list, labels=[0,1]))
+        Abstract.plot_confusion_matrix(y_list, y_pred_list, ['Real', 'Fake'], "validation")
         return mean_loss, val_acc
 
     def train(self) -> None:
@@ -272,10 +281,12 @@ class Abstract(ABC):
         min_threshold = [int(i) for i in self.opt.min_threshold.split()]
         attention_loss = Attention_Correlation_weight_reshape_loss(c_out=c_out, c_in=c_in, c_cross=c_cross)
         dir_csv_train, dir_csv_val = self.get_csvs_paths()
-        optimizer = Abstract.get_optimizer(self.model, self.lr)
+        optimizer_dict = [{"params": self.model.parameters(), 'lr': self.opt.lr},
+                        {"params": [c_in, c_out, c_cross], 'lr': self.opt.lr}]
+        optimizer = torch.optim.Adam(optimizer_dict, lr=self.opt.lr, betas=(self.opt.beta1, 0.999), eps=self.opt.eps)
         print("Number of trainable parameters:", Abstract.count_parameters(self.model))
         scheduler = Abstract.get_scheduler_reduceOnPlateau(optimizer, mode='min', factor=0.1, patience=5, threshold=0.0001)
-        criterion = nn.CrossEntropyLoss()
+        criterion = nn.CrossEntropyLoss(weight=torch.tensor([6, 6/5]).to(device))
         criterion = criterion.cuda()
         loss_fn, weights = [], []
         for loss_name, weight in {criterion:1}.items():
@@ -284,9 +295,10 @@ class Abstract(ABC):
         weightedloss = WeightedLosses(loss_fn, weights)
         summary_writer = SummaryWriter(self.name + "_logs" + str(time.strftime("%Y.%m.%d.%H.%M.%S", time.localtime())))
         loss_functions = {"classifier_loss": weightedloss}
-        train_loader, val_loader = custom_model.data_loader(dir_csv_train, dir_csv_val, self.batch_size)
-        train_losses, train_accs, val_losses, val_acc = [],[],[],[]
+        train_loader, val_loader = model_loading.data_loader(dir_csv_train, dir_csv_val, self.batch_size)
+        train_losses, train_accs = [],[]
         best_val_acc = 0.0
+        early_stopping_counter = 0
         iter_per_epoch = len(train_loader)
         max_iter = self.opt.niter * iter_per_epoch
         feat_tensorlist = []
@@ -298,34 +310,36 @@ class Abstract(ABC):
             progress_bar = tqdm(train_loader, desc='Training', leave=False)
             number_steps = 0
             losses = AverageMeter()
+            y_list, y_pred_list = [], []
             for iter_num, (raw, labels) in enumerate(progress_bar):
                 if (iter_num != 0 and iter_num % int(self.opt.update_epoch * iter_per_epoch) == 0):
                     ## for compute MVG parameter
-                    feat_tensorlist = torch.cat(feat_tensorlist, dim=0).to(device)
-                    inv_covariance_real = fit_inv_covariance(feat_tensorlist).cpu()
+                    feat_tensorlist = torch.cat(feat_tensorlist, dim=0)
+                    inv_covariance_real = fit_inv_covariance(feat_tensorlist).cpu() # maybe try detach
                     mean_real = feat_tensorlist.mean(dim=0).cpu()  # mean features.
                     gauss_param_real = {'mean': mean_real.tolist(), 'covariance': inv_covariance_real.tolist()}
                     with open(os.path.join(self.opt.outf, 'gauss_param_real.json'),'w') as f:
                         json.dump(gauss_param_real, f)
                     feat_tensorlist = []
 
-                    feat_tensorlist_fake = torch.cat(feat_tensorlist_fake, dim=0).to(device)
+                    feat_tensorlist_fake = torch.cat(feat_tensorlist_fake, dim=0)
                     inv_covariance_fake = fit_inv_covariance(feat_tensorlist_fake).cpu()
                     mean_fake = feat_tensorlist_fake.mean(dim=0).cpu()  # mean features.
                     gauss_param_fake = {'mean': mean_fake.tolist(), 'covariance': inv_covariance_fake.tolist()}
                     with open(os.path.join(self.opt.outf, 'gauss_param_fake.json'),'w') as f:
                         json.dump(gauss_param_fake, f)
                     feat_tensorlist_fake = []
-
+                    torch.cuda.synchronize()
 
                 
                 self.model.train(True)
-                image = raw.to(device)
-                img_label = np.array(labels)
-                labels = labels.to(device).to(torch.float)
-                optimizer.zero_grad()
+                image = raw.cuda()
+                img_label = np.array(labels).astype(np.float32)
+                labels = labels.cuda().to(torch.float32)
                 step = iter_num / max_iter
+                optimizer.zero_grad()
                 classes, feat_patch, attn_map = self.model(image, step=step, attn_blk=self.opt.attn_blk, feat_blk=self.opt.feat_blk, k=self.opt.k_weight, thr=self.opt.k_thr)
+
                 ### learn MVG parameters
                 realindex = np.where(img_label==0.0)[0]
                 attn_map_real = torch.sigmoid(torch.mean(attn_map[realindex,:, 1:, 1:], dim=1))
@@ -362,26 +376,33 @@ class Abstract(ABC):
                     loss_dis_tatol = loss_dis
                 
                 loss_dis_tatol.backward()
+                torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
                 optimizer.step()
                 optimizer.zero_grad()
-                output_pred = F.softmax(classes, dim=1).cpu().data.numpy()[:, 1]
+                output_pred = torch.argmax(F.softmax(classes, dim=1).cpu().data, dim=1)
                 predicted = np.round(output_pred)
-                predicted = torch.tensor(Abstract.confident_strategy(predicted))
-                y = torch.argmax(torch.tensor(img_label), dim=1)[0]
+                
+                y = torch.argmax(torch.tensor(img_label), dim=1)
+                y_list.append(y)
+                y_pred_list.append(predicted)
                 correct += torch.sum(predicted.eq(y)).item()
                 running_loss += loss_dis_tatol.item()
-                number_steps += 1
+                number_steps += 32
                 losses.update(loss_dis_tatol.item())
                 progress_bar.set_postfix({'epoch': current_epoch, 'loss': losses.avg, 'acc': 100 * (correct / number_steps)})
+            torch.cuda.synchronize()
             train_losses.append(running_loss / (len(train_loader) * self.batch_size))
             train_accs.append(100 * (correct / number_steps))
             valid_loss, valid_acc = self.validate(loss_functions["classifier_loss"], val_loader)
             scheduler.step(valid_loss)
             print("Last LR", scheduler.get_last_lr())
-            print('Train Accuracy: {:.2f}%'.format(100*correct/(len(train_loader)*self.batch_size)))
-            print('Train Loss: {:.4f}'.format(running_loss/(len(train_loader)*self.batch_size)))
-            print('Validation Accuracy: {:.2f}%'.format(valid_acc))
-            print('Validation Loss: {:.4f}'.format(valid_loss))
+            print('Train Accuracy: {:.2f}%'.format(100 * (correct / number_steps)))
+            print('Train Loss: {:.4f}'.format(losses.avg))
+            print("Precision: ", precision_score(y_list, y_pred_list, labels=[0,1]))
+            print("Recall: ", recall_score(y_list, y_pred_list, labels=[0,1]))
+            print("F1 Score: ", f1_score(y_list, y_pred_list, labels=[0,1]))
+            print('--------------------------------')
+            Abstract.plot_confusion_matrix(y_list, y_pred_list, ['Real', 'Fake'], "train")
             summary_writer.add_scalar('train loss', float(losses.avg), global_step=current_epoch)
             summary_writer.add_scalar('train acc', float(100*(correct/number_steps)), global_step=current_epoch)
             summary_writer.add_scalar('validation loss', float(valid_loss), global_step=current_epoch)
@@ -390,7 +411,7 @@ class Abstract(ABC):
             if valid_acc > best_val_acc:
                 best_val_acc = valid_acc
                 self.Validation_Accuracy = valid_acc
-                early_stopping_counter = 0
+                
             else:
                 early_stopping_counter += 1
 
@@ -416,7 +437,7 @@ class Abstract(ABC):
         number_steps = 0
         self.model = Abstract.load_model(self.model, self.name + "_" + str(self.Validation_Accuracy) + '.pt')
         dir_csv_test = self.get_test_csvs_path()
-        test_loader = custom_model.testloader(dir_csv_test,self.batch_size)
+        test_loader = model_loading.testloader(dir_csv_test,self.batch_size)
         y_true_list, y_pred_list = [], []
         iter_per_epoch = len(test_loader)
         max_iter = self.opt.niter * iter_per_epoch
@@ -425,48 +446,44 @@ class Abstract(ABC):
 
             for iter_num, (raw, labels) in enumerate(progress_bar):
                 self.model.eval()
-                raw = raw.to(device)
+                raw = raw.cuda()
                 img_label = np.array(labels)   
-                labels = labels.to(device).to(torch.float)
+                labels = labels.cuda().to(torch.float)
                 step = iter_num / max_iter
                 outputs, feat_patch, attn_map = self.model(raw, step=step, attn_blk=self.opt.attn_blk, feat_blk=self.opt.feat_blk, k=self.opt.k_weight, thr=self.opt.k_thr)
-                output_pred = F.softmax(outputs, dim=1).cpu().data.numpy()[:, 1]
+                output_pred = torch.argmax(F.softmax(outputs, dim=1).cpu().data, dim=1)
                 y_pred = np.round(output_pred)
-                y_pred = np.round(Abstract.confident_strategy(y_pred))
-                y = torch.argmax(torch.tensor(img_label), dim=1)[0]
+                y = torch.argmax(torch.tensor(img_label), dim=1)
                 y_pred = np.array([y_pred])
                 y = np.array([y])
                 test_acc += accuracy_score(y, y_pred)
-                precision += precision_score(y, y_pred, labels=[0,1], average='micro')
-                recall += recall_score(y, y_pred, labels=[0,1], average='micro')
-                score += f1_score(y, y_pred, average='micro')
                 number_steps += 1
-                progress_bar.set_postfix({'acc': test_acc/number_steps, 'precision': precision/number_steps,
-                                        'recall': recall/number_steps, 'f1_score': score/number_steps})
+                progress_bar.set_postfix({'acc': test_acc/number_steps})
                 y_true_list.append(y)
                 y_pred_list.append(y_pred)
-        print('Test Accuracy: %.2f'%(test_acc/(len(test_loader))),
-        'Test precision: %.2f'%( precision/(len(test_loader))),
-        'Test recall: %.2f'%( recall/(len(test_loader))),
-        'Test f1_score: %.2f'%( score/(len(test_loader))))
+        
+        print("Test Accuracy: ", 100 * accuracy_score(y_true_list, y_pred_list))
+        print("Test Precision: ", 100 * precision_score(y_true_list, y_pred_list, labels=[0,1]))
+        print("Test Recall: ", 100 * recall_score(y_true_list, y_pred_list, labels=[0,1]))
+        print("Test F1 Score: ", 100 * f1_score(y_true_list, y_pred_list, labels=[0,1]))
         y_true_list = [item for sublist in y_true_list for item in sublist]
         y_pred_list = [item for sublist in y_pred_list for item in sublist]
-        Abstract.plot_confusion_matrix(y_true_list, y_pred_list, ['Real', 'Fake'])
+        Abstract.plot_confusion_matrix(y_true_list, y_pred_list, ['Real', 'Fake'], "test")
 
     @staticmethod
-    def plot_confusion_matrix(y_true, y_pred, classes) -> None:
+    def plot_confusion_matrix(y_true, y_pred, classes, type_) -> None:
         y_true = np.asarray(y_true)
         y_pred = np.asarray(y_pred)
         cm_display = ConfusionMatrixDisplay(confusion_matrix = confusion_matrix(y_true, y_pred), display_labels = classes)
         cm_display.plot()
+        cm_display.ax_.set_title(type_ + ' Confusion Matrix')
     
 class UAIViT(Abstract):
     def __init__(self, opt, num_classes:int = 2, epochs: int = 10, batch_size:int = 128, save_wieghts:bool = False, load_weights:str = None) -> None:
-        self.model = vit_base_patch16_380(pretrained=False, num_classes=num_classes).to(device)
+        self.model = vit_base_patch16_224(pretrained=False, num_classes=num_classes).to(device)
 
         super().__init__(self.model, epochs, batch_size, save_wieghts, load_weights, opt)
 
     def __call__(self) -> None:
         self.train()
         self.test()
-
