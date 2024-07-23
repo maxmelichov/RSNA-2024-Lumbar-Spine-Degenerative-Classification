@@ -339,9 +339,9 @@ def vit_base_patch16_224(pretrained=False, **kwargs):
 
 
 @register_model
-def vit_base_patch16_380(pretrained=False, **kwargs):
+def vit_base_patch16_384(pretrained=False, **kwargs):
     model = VisionTransformer(
-        img_size=380, patch_size=16, embed_dim=768, depth=12, num_heads=12, mlp_ratio=4, qkv_bias=True,
+        img_size=384, patch_size=16, embed_dim=768, depth=12, num_heads=12, mlp_ratio=4, qkv_bias=True,
         norm_layer=partial(nn.LayerNorm, eps=1e-6), **kwargs)
     model.default_cfg = default_cfgs['vit_base_patch16_384']
     if pretrained:
