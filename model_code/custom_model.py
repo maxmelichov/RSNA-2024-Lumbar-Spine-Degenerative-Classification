@@ -8,9 +8,9 @@ from network.vit_16_base_feat_middle_gal_v2 import vit_base_patch16_384
 class CustomModel(nn.Module):
     def __init__(self):
         super(CustomModel, self).__init__()
-        self.EfficientNet_model_Sagittal_T1 = EfficientNet.from_pretrained('efficientnet-b5', out_size=[1, 3])
-        self.EfficientNet_model_Axial_T2 = EfficientNet.from_pretrained('efficientnet-b5', out_size=[1, 3])
-        self.EfficientNet_model_Sagittal_T2_STIR = EfficientNet.from_pretrained('efficientnet-b5', out_size=[1, 3])
+        self.EfficientNet_model_Sagittal_T1 = EfficientNet.from_pretrained('efficientnet-b5')
+        self.EfficientNet_model_Axial_T2 = EfficientNet.from_pretrained('efficientnet-b5')
+        self.EfficientNet_model_Sagittal_T2_STIR = EfficientNet.from_pretrained('efficientnet-b5')
         self.transformer = vit_base_patch16_384()
 
     def forward(self, Sagittal_T1, Axial_T2, Sagittal_T2_STIR):
