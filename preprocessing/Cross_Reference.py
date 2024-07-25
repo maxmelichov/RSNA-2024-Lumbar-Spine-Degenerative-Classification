@@ -129,40 +129,42 @@ class CrossReference:
         
 
     @staticmethod
-    def _infer_axis_from_study(sag_t: dict, ax_t2: dict) -> None:
+    def _infer_axis_from_study(sag_t: dict, axs_t2: list[dict]) -> None:
         top_left_hand_corner_sag_t2 = sag_t["positions"][len(sag_t["array"]) // 2]
         sag_y_axis_to_pixel_space = [top_left_hand_corner_sag_t2[2]]
         while len(sag_y_axis_to_pixel_space) < sag_t["array"].shape[1]: 
             sag_y_axis_to_pixel_space.append(sag_y_axis_to_pixel_space[-1] - sag_t["pixel_spacing"][1])
 
-        sag_y_coord_to_axial_slice = {}
-        for ax_t2_slice, ax_t2_pos in zip(ax_t2["array"], ax_t2["positions"]):
-            diffs = np.abs(np.asarray(sag_y_axis_to_pixel_space) - ax_t2_pos[2])
-            sag_y_coord = np.argmin(diffs)
-            sag_y_coord_to_axial_slice[sag_y_coord] = ax_t2_slice
-
         
-        bboxes = segmentation.inference(sag_t["sorted_files"][len(sag_t["sorted_files"]) // 2])
-        for i, y in enumerate([*sag_y_coord_to_axial_slice]):
-            classes = CrossReference._find_classes(y, bboxes)
-            if classes != -1:
-                for cls in classes:
-                    save_path, file_name = CrossReference._get_save_path_for_Axial(ax_t2["sorted_files"][i], cls)
-                    os.makedirs(save_path, exist_ok=True)
-                    shutil.copyfile(ax_t2["sorted_files"][i], os.path.join(save_path, file_name))
+        for ax_t2 in axs_t2:
+            sag_y_coord_to_axial_slice = {}
+            for ax_t2_slice, ax_t2_pos in zip(ax_t2["array"], ax_t2["positions"]):
+                diffs = np.abs(np.asarray(sag_y_axis_to_pixel_space) - ax_t2_pos[2])
+                sag_y_coord = np.argmin(diffs)
+                sag_y_coord_to_axial_slice[sag_y_coord] = ax_t2_slice
+
+            
+            bboxes = segmentation.inference(sag_t["sorted_files"][len(sag_t["sorted_files"]) // 2])
+            for i, y in enumerate([*sag_y_coord_to_axial_slice]):
+                classes = CrossReference._find_classes(y, bboxes)
+                if classes != -1:
+                    for cls in classes:
+                        save_path, file_name = CrossReference._get_save_path_for_Axial(ax_t2["sorted_files"][i], cls)
+                        os.makedirs(save_path, exist_ok=True)
+                        shutil.copyfile(ax_t2["sorted_files"][i], os.path.join(save_path, file_name))
 
 
     @staticmethod
     def get_cross_reference_for_Axial(study: pd.DataFrame) -> None:
         image_dir = "train_images\\"
-        sag_t1, sag_t2, ax_t2 = None, None, None
+        sag_t1, sag_t2, ax_t2 = None, None, []
         for row in study.itertuples():
             if row.series_description == "Sagittal T2/STIR":
                 sag_t2 = CrossReference._load_dicom_stack(os.path.join(image_dir, str(row.study_id), str(row.series_id)), plane="sagittal")
             elif row.series_description == "Sagittal T1":
                 sag_t1 = CrossReference._load_dicom_stack(os.path.join(image_dir, str(row.study_id), str(row.series_id)), plane="sagittal")
             elif row.series_description == "Axial T2":
-                ax_t2 = CrossReference._load_dicom_stack(os.path.join(image_dir, str(row.study_id), str(row.series_id)), plane="axial", reverse_sort=True)
+                ax_t2.append(CrossReference._load_dicom_stack(os.path.join(image_dir, str(row.study_id), str(row.series_id)), plane="axial", reverse_sort=True))
         if sag_t2 and ax_t2:
             CrossReference._infer_axis_from_study(sag_t2, ax_t2)
         elif sag_t1 and ax_t2:
