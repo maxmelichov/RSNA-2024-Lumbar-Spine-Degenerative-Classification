@@ -202,31 +202,57 @@ class CustomDataset(Dataset):
         Sagittal_T2_STIR = torch.tensor(Sagittal_T2_STIR).permute(2, 0, 1)
 
         category_hot = F.one_hot(torch.tensor(category2id[category]), num_classes=5)
-        if self.df_labels.iloc[index]['spinal_canal_stenosis'] == np.nan:
+
+        if type(self.df_labels.iloc[index]['spinal_canal_stenosis']) == float:
             label0 = [-100, -100, -100]
         else:
             label0 = F.one_hot(torch.tensor(label2id[self.df_labels.iloc[index]['spinal_canal_stenosis']]), num_classes=3)
         
-        if self.df_labels.iloc[index]['left_neural_foraminal_narrowing'] == np.nan:
+        if type(self.df_labels.iloc[index]['left_neural_foraminal_narrowing']) == float:
             label1 = [-100, -100, -100]
         else:
             label1 = F.one_hot(torch.tensor(label2id[self.df_labels.iloc[index]['left_neural_foraminal_narrowing']]), num_classes=3)
         
-        if self.df_labels.iloc[index]['right_neural_foraminal_narrowing'] == np.nan:
+        if type(self.df_labels.iloc[index]['right_neural_foraminal_narrowing']) == float:
             label2 = [-100, -100, -100]
         else:
             label2 = F.one_hot(torch.tensor(label2id[self.df_labels.iloc[index]['right_neural_foraminal_narrowing']]), num_classes=3)
 
-        if self.df_labels.iloc[index]['left_subarticular_stenosis'] == np.nan:
+        if type(self.df_labels.iloc[index]['left_subarticular_stenosis']) == float:
             label3 = [-100, -100, -100]
         else:
             label3 = F.one_hot(torch.tensor(label2id[self.df_labels.iloc[index]['left_subarticular_stenosis']]), num_classes=3)
         
-        if self.df_labels.iloc[index]['right_subarticular_stenosis'] == np.nan:
+        if type(self.df_labels.iloc[index]['right_subarticular_stenosis']) == float:
             label4 = [-100, -100, -100]
         else:
             label4 = F.one_hot(torch.tensor(label2id[self.df_labels.iloc[index]['right_subarticular_stenosis']]), num_classes=3)
+        
         flattened_list = [item for sublist in [label0, label1, label2, label3, label4] for item in sublist]
+
+        # if type(self.df_labels.iloc[index]['spinal_canal_stenosis']) == float:
+        #     label0 = -100
+        # else:
+        #     label0 = torch.tensor(label2id[self.df_labels.iloc[index]['spinal_canal_stenosis']])
+        # if type(self.df_labels.iloc[index]['left_neural_foraminal_narrowing']) == float:
+        #     label1 = -100
+        # else:
+        #     label1 = torch.tensor(label2id[self.df_labels.iloc[index]['left_neural_foraminal_narrowing']])
+        # if type(self.df_labels.iloc[index]['right_neural_foraminal_narrowing']) == float:
+        #     label2 = -100
+        # else:
+        #     label2 = torch.tensor(label2id[self.df_labels.iloc[index]['right_neural_foraminal_narrowing']])
+        # if type(self.df_labels.iloc[index]['left_subarticular_stenosis']) == float:
+        #     label3 = -100
+        # else:
+        #     label3 = torch.tensor(label2id[self.df_labels.iloc[index]['left_subarticular_stenosis']])
+        # if type(self.df_labels.iloc[index]['right_subarticular_stenosis']) == float:
+        #     label4 = -100
+        # else:
+        #     label4 = torch.tensor(label2id[self.df_labels.iloc[index]['right_subarticular_stenosis']])
+        
+        # labels = torch.tensor([label0, label1, label2, label3, label4], dtype=torch.float32)
+
         labels = torch.tensor(flattened_list, dtype=torch.float32)
 
         return Axial_T2, Sagittal_T1, Sagittal_T2_STIR, category_hot, labels

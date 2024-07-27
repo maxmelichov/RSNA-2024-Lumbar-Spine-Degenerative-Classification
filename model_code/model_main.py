@@ -267,7 +267,7 @@ class Abstract(ABC):
         print("Number of trainable parameters:", Abstract.count_parameters(self.model))
         scheduler = Abstract.get_scheduler_reduceOnPlateau(optimizer, mode='min', factor=0.1, patience=5, threshold=0.0001)
         weights = torch.tensor([1.0, 2.0, 4.0])
-        criterion = nn.CrossEntropyLoss()
+        criterion = nn.CrossEntropyLoss(weight=weights.to(device))
         criterion = criterion.cuda()
         loss_fn, weights = [], []
         for loss_name, weight in {criterion:1}.items():
@@ -341,11 +341,11 @@ class Abstract(ABC):
                     labels = labels.cuda().to(torch.float32)
                     step = iter_num / max_iter
                     optimizer.zero_grad()
+                    loss_dis = 0.0
                     classes, feat_patch, attn_map = self.model(Axial_T2 = Axial_T2, Sagittal_T1 = Sagittal_T1, Sagittal_T2_STIR = Sagittal_T2_STIR,
                                                                category_hot = category_hot, 
                                                                 step=step, attn_blk=self.opt.attn_blk, feat_blk=self.opt.feat_blk,
                                                                   k=self.opt.k_weight, thr=self.opt.k_thr)
-
                     ### learn MVG parameters
                     realindex = np.where(img_label==0.0)[0]
                     attn_map_real = torch.sigmoid(torch.mean(attn_map[realindex,:, 1:, 1:], dim=1))
@@ -359,6 +359,9 @@ class Abstract(ABC):
                     # attn_map_fake = torch.mean(attn_map[fakeindex,:, 1:, 1:], dim=1)
 
                     del attn_map
+                    
+                        
+                        
 
                     feat_patch_fake_inner = feat_patch_fake[:, min_threshold_H[0]:min_threshold_H[1], min_threshold[0]:min_threshold[1], :]
                     B, H, W, C = feat_patch_fake_inner.size()
@@ -370,15 +373,22 @@ class Abstract(ABC):
                         maha_patch_2 = mahalanobis_distance(feat_patch.reshape((B*H*W, C)), mean_fake.cuda(), inv_covariance_fake.cuda())
                         del feat_patch
                         index_map = torch.relu(maha_patch_1 - maha_patch_2).reshape((B, H, W))
-                        
-                        loss_dis = criterion(classes, labels)
+                        for col in range(5):
+                            pred = classes[:,col*3:col*3+3]
+                            
+                            gt = labels[:,col*3:col*3+3]
+                            loss_dis += criterion(pred, gt) / 5
 
                         ### for attetion correlation loss
                         loss_inter_frame = attention_loss(attn_map_real, attn_map_fake, index_map[fakeindex,:])
                         lambda_c = [float(p) for p in self.opt.lambda_c_param.split()]
                         loss_dis_tatol = loss_dis + self.opt.lambda_corr * loss_inter_frame + lambda_c[0]*torch.abs(c_cross) + lambda_c[1]/torch.abs(c_in) + lambda_c[2]/torch.abs(c_out)
                     else:
-                        loss_dis = criterion(classes, labels)
+                        for col in range(5):
+                            pred = classes[:,col*3:col*3+3]
+                            
+                            gt = labels[:,col*3:col*3+3]
+                            loss_dis += criterion(pred, gt) / 5
                         loss_dis_tatol = loss_dis
                     
                     loss_dis_tatol.backward()
@@ -386,7 +396,10 @@ class Abstract(ABC):
                     optimizer.step()
                     optimizer.zero_grad()
                     output_pred = F.softmax(classes, dim=1).detach().cpu().tolist()
-                    accuracy = roc_auc_score(img_label, output_pred, average="micro")
+                    try:
+                        accuracy = roc_auc_score(img_label, output_pred, average="micro")
+                    except ValueError:
+                        pass
                     correct += accuracy
                     running_loss += loss_dis_tatol.item()
                     number_steps += 1
