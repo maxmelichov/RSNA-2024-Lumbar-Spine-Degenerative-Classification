@@ -222,22 +222,25 @@ class Abstract(ABC):
             validation_batch_losses = []
             progress_bar = tqdm(val_loader, desc='Validation', leave=False)
             y_list, y_pred_list = [], []
-            for iter_num, (raw, labels) in enumerate(progress_bar):
+            for iter_num, (Axial_T2, Sagittal_T1, Sagittal_T2_STIR, category_hot, labels) in enumerate(progress_bar):
                 raw = raw.cuda()
                 img_label = np.array(labels)
                 labels = labels.cuda().to(torch.float)
                 step = iter_num / max_iter
-                outputs, _, _ = self.model(raw, step=step, attn_blk=self.opt.attn_blk, feat_blk=self.opt.feat_blk, k=self.opt.k_weight, thr=self.opt.k_thr)
-                output_pred = torch.argmax(F.softmax(outputs, dim=1).cpu().data, dim=1)
-                predicted = np.round(output_pred)
-                y = torch.argmax(torch.tensor(img_label), dim=1)
-                y_list.append(y)
+                outputs, _, _ = self.model(Axial_T2 = Axial_T2, Sagittal_T1 = Sagittal_T1, Sagittal_T2_STIR = Sagittal_T2_STIR,
+                                             category_hot = category_hot, step=step, attn_blk=self.opt.attn_blk, feat_blk=self.opt.feat_blk,
+                                             k=self.opt.k_weight, thr=self.opt.k_thr)
+                predicted = F.softmax(outputs, dim=1).detach().cpu().tolist()
+                try:
+                    accuracy = roc_auc_score(img_label, predicted, average="micro")
+                except ValueError:
+                    pass
+                correct += accuracy
                 y_pred_list.append(predicted)
-                correct += torch.sum(predicted.eq(y)).item()
                 loss = loss_fn(outputs, labels)
                 validation_batch_losses.append(float(loss))
                 mean_loss = statistics.mean(validation_batch_losses)
-                number_steps += 32
+                number_steps += 1
                 progress_bar.set_postfix({'acc':100 * (correct / number_steps)})
         val_acc = 100 * (correct / number_steps)
         print("Validation Accuracy: ", 100 * accuracy_score(y_list, y_pred_list))
@@ -267,7 +270,7 @@ class Abstract(ABC):
         print("Number of trainable parameters:", Abstract.count_parameters(self.model))
         scheduler = Abstract.get_scheduler_reduceOnPlateau(optimizer, mode='min', factor=0.1, patience=5, threshold=0.0001)
         weights = torch.tensor([1.0, 2.0, 4.0])
-        criterion = nn.CrossEntropyLoss(weight=weights.to(device), ignore_index=-100)
+        criterion = nn.CrossEntropyLoss(weight=weights.to(device))
         criterion = criterion.cuda()
         loss_fn, weights = [], []
         for loss_name, weight in {criterion:1}.items():
@@ -371,9 +374,12 @@ class Abstract(ABC):
                         del feat_patch
                         index_map = torch.relu(maha_patch_1 - maha_patch_2).reshape((B, H, W))
                         for col in range(5):
+
                             pred = classes[:,col*3:col*3+3]
                             
                             gt = labels[:,col*3:col*3+3]
+                            if torch.all(gt.eq(torch.tensor([-100, -100, -100], device='cuda:0'))):
+                                continue
                             loss_dis = loss_dis + criterion(pred, gt) / 5
 
                         ### for attetion correlation loss
@@ -385,6 +391,8 @@ class Abstract(ABC):
                             pred = classes[:,col*3:col*3+3]
                             
                             gt = labels[:,col*3:col*3+3]
+                            if torch.all(gt.eq(torch.tensor([-100, -100, -100], device='cuda:0'))):
+                                continue
                             loss_dis = loss_dis + criterion(pred, gt) / 5
                         loss_dis_tatol = loss_dis
                     

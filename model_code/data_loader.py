@@ -209,7 +209,7 @@ class CustomDataset(Dataset):
             label0 = F.one_hot(torch.tensor(label2id[self.df_labels.iloc[index]['spinal_canal_stenosis']]), num_classes=3)
         
         if type(self.df_labels.iloc[index]['left_neural_foraminal_narrowing']) == float:
-            label1 = [-100, -100, -100]
+            label1 =[-100, -100, -100]
         else:
             label1 = F.one_hot(torch.tensor(label2id[self.df_labels.iloc[index]['left_neural_foraminal_narrowing']]), num_classes=3)
         
@@ -253,7 +253,7 @@ class CustomDataset(Dataset):
         
         # labels = torch.tensor([label0, label1, label2, label3, label4], dtype=torch.float32)
 
-        labels = torch.tensor(flattened_list, dtype=torch.int16)
+        labels = torch.tensor(flattened_list, dtype=torch.float32)
 
         return Axial_T2, Sagittal_T1, Sagittal_T2_STIR, category_hot, labels
 
