@@ -202,11 +202,32 @@ class CustomDataset(Dataset):
         Sagittal_T2_STIR = torch.tensor(Sagittal_T2_STIR).permute(2, 0, 1)
 
         category_hot = F.one_hot(torch.tensor(category2id[category]), num_classes=5)
-        labels = torch.tensor([label2id[self.df_labels.iloc[index]['spinal_canal_stenosis']],
-                              label2id[self.df_labels.iloc[index]['left_neural_foraminal_narrowing']],
-                              label2id[self.df_labels.iloc[index]['right_neural_foraminal_narrowing']],
-                              label2id[self.df_labels.iloc[index]['left_subarticular_stenosis']],
-                                label2id[self.df_labels.iloc[index]['right_subarticular_stenosis']]], dtype=torch.float32)
+        if self.df_labels.iloc[index]['spinal_canal_stenosis'] == np.nan:
+            label0 = [-100, -100, -100]
+        else:
+            label0 = F.one_hot(torch.tensor(label2id[self.df_labels.iloc[index]['spinal_canal_stenosis']]), num_classes=3)
+        
+        if self.df_labels.iloc[index]['left_neural_foraminal_narrowing'] == np.nan:
+            label1 = [-100, -100, -100]
+        else:
+            label1 = F.one_hot(torch.tensor(label2id[self.df_labels.iloc[index]['left_neural_foraminal_narrowing']]), num_classes=3)
+        
+        if self.df_labels.iloc[index]['right_neural_foraminal_narrowing'] == np.nan:
+            label2 = [-100, -100, -100]
+        else:
+            label2 = F.one_hot(torch.tensor(label2id[self.df_labels.iloc[index]['right_neural_foraminal_narrowing']]), num_classes=3)
+
+        if self.df_labels.iloc[index]['left_subarticular_stenosis'] == np.nan:
+            label3 = [-100, -100, -100]
+        else:
+            label3 = F.one_hot(torch.tensor(label2id[self.df_labels.iloc[index]['left_subarticular_stenosis']]), num_classes=3)
+        
+        if self.df_labels.iloc[index]['right_subarticular_stenosis'] == np.nan:
+            label4 = [-100, -100, -100]
+        else:
+            label4 = F.one_hot(torch.tensor(label2id[self.df_labels.iloc[index]['right_subarticular_stenosis']]), num_classes=3)
+        flattened_list = [item for sublist in [label0, label1, label2, label3, label4] for item in sublist]
+        labels = torch.tensor(flattened_list, dtype=torch.float32)
 
         return Axial_T2, Sagittal_T1, Sagittal_T2_STIR, category_hot, labels
 

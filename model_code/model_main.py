@@ -7,7 +7,7 @@ from abc import ABC
 from pathlib import Path
 from tqdm import tqdm
 import inspect
-from sklearn.metrics import precision_score, recall_score, f1_score, confusion_matrix, ConfusionMatrixDisplay, accuracy_score
+from sklearn.metrics import precision_score, recall_score, f1_score, confusion_matrix, ConfusionMatrixDisplay, accuracy_score , roc_auc_score
 from torch.utils.data import DataLoader
 import os
 from pathlib import Path
@@ -266,6 +266,7 @@ class Abstract(ABC):
         optimizer = torch.optim.AdamW(optimizer_dict, lr=self.opt.lr, betas=(self.opt.beta1, 0.999), eps=self.opt.eps)
         print("Number of trainable parameters:", Abstract.count_parameters(self.model))
         scheduler = Abstract.get_scheduler_reduceOnPlateau(optimizer, mode='min', factor=0.1, patience=5, threshold=0.0001)
+        weights = torch.tensor([1.0, 2.0, 4.0])
         criterion = nn.CrossEntropyLoss()
         criterion = criterion.cuda()
         loss_fn, weights = [], []
@@ -384,15 +385,11 @@ class Abstract(ABC):
                     torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
                     optimizer.step()
                     optimizer.zero_grad()
-                    output_pred = torch.argmax(F.softmax(classes, dim=1).cpu().data, dim=1)
-                    predicted = np.round(output_pred)
-                    
-                    y = torch.argmax(torch.tensor(img_label), dim=1)
-                    y_list.append(y)
-                    y_pred_list.append(predicted)
-                    correct += torch.sum(predicted.eq(y)).item()
+                    output_pred = F.softmax(classes, dim=1).detach().cpu().tolist()
+                    accuracy = roc_auc_score(img_label, output_pred, average="micro")
+                    correct += accuracy
                     running_loss += loss_dis_tatol.item()
-                    number_steps += 32
+                    number_steps += 1
                     losses.update(loss_dis_tatol.item())
                     progress_bar.set_postfix({'epoch': current_epoch, 'loss': losses.avg, 'acc': 100 * (correct / number_steps)})
                 torch.cuda.synchronize()
