@@ -8,8 +8,12 @@ import os
 from PIL import Image
 from preprocessing.segmantation_inference import SegmentaionInference, classes_of_interest, label_dict_clean
 import torch.nn.functional as F
+from pathlib import Path
+import scipy.ndimage
 segmentation = SegmentaionInference(model_path=r"weights\simple_unet.pth")
 label2id = {'Normal/Mild': 0, 'Moderate':1, 'Severe':2}
+category2id = {"L1": 0, "L2": 1, "L3": 2, "L4": 3, "L5": 4}
+skip_study_id = [2492114990, 2780132468, 3008676218]
 
 AUG_PROB = 0.75
 IMG_SIZE = [512, 512]
@@ -47,47 +51,45 @@ if not NOT_DEBUG or not AUG:
 
 
 class CustomDataset(Dataset):
-    def __init__(self, data_path,labels_path, transform=None):
+    def __init__(self, data_path,labels_path, transform):
         self.df = pd.read_csv(data_path)
         self.df_labels = pd.read_csv(labels_path)
+        self.transform = transform
         pass
     def __len__(self):
         return len(self.df_labels)
 
     @staticmethod
-    def pad_images_list(images_list, max_len):
+    def pad_images_list(images_list, max_len): # need to check this function
         if len(images_list) < 0:
             raise ValueError("images_list is empty")
         if len(images_list) == max_len:
             return images_list
         
-        current_length = len(images_list)
-        if current_length >= max_len:
-            return images_list[:max_len]
+        n = len(images_list)
+        output_list = []
         
-        # Calculate the number of duplicates needed
-        duplicates_needed = images_list - current_length
-        result = []
-        center_index = current_length // 2
+        # How many times should we duplicate each element minimally?
+        min_repeats = max_len // n
         
-        # Add elements to the result, focusing on duplicating center elements
-        for i in range(current_length):
-            # Calculate how many times the current element should be duplicated
-            if i == center_index:
-                duplicate_count = duplicates_needed // 2 + 1
-            elif i == center_index - 1 and current_length % 2 == 0:
-                duplicate_count = duplicates_needed // 2 + 1
-            else:
-                duplicate_count = 1
-            
-            result.extend([images_list[i]] * duplicate_count)
+        # How many extra duplicates are needed beyond minimal repeats?
+        extra = max_len % n
         
-        # Trim the result to the target length if it exceeds
-        return result[:max_len]
+        # Determine the central region to duplicate more
+        mid_point = n // 2
+        start_extra = mid_point - (extra // 2)
+        end_extra = start_extra + extra
+        
+        # Duplicate elements, adding extra repeats to central elements
+        for i in range(n):
+            repeats = min_repeats + 1 if start_extra <= i < end_extra else min_repeats
+            output_list.extend([images_list[i]] * repeats)
+
+        return output_list
 
 
     @staticmethod
-    def center_crop(dcm_path, bboxes):
+    def center_crop(dcm_path, bboxes): # need to check this function
         min_x, max_x = 999999, -1
         min_y, max_y = 999999, -1
         list_of_bboxes = [boxes[0] for boxes in bboxes.values()]
@@ -110,7 +112,7 @@ class CustomDataset(Dataset):
         return cropped_image_array
 
     @staticmethod
-    def unpad_images_list(images_list, max_len):
+    def unpad_images_list(images_list, max_len): # need to check this function
         i = 0
         while len(images_list) > max_len:
             if i % 2 == 0:
@@ -118,7 +120,18 @@ class CustomDataset(Dataset):
             else:
                 images_list.pop(0)
             i += 1
+        return images_list
 
+    @staticmethod
+    def resize_image(pixel_array, new_size):
+        return scipy.ndimage.zoom(pixel_array, (new_size[0]/pixel_array.shape[0], new_size[1]/pixel_array.shape[1]), order=3)  # order=3 for bicubic
+        # if pixel_array.shape == new_size:
+        #     return pixel_array
+        # elif pixel_array.shape[0] > new_size[0] or pixel_array.shape[1] > new_size[1]:
+        #     return scipy.ndimage.zoom(pixel_array, (new_size[0]/pixel_array.shape[0], new_size[1]/pixel_array.shape[1]), order=3)
+        # else:
+        #     image = Image.fromarray(pixel_array)
+        #     return image.resize((512, 512), Image.LANCZOS)  # You can use Image.LANCZOS for potentially better quality
 
 
     def __getitem__(self, index):
@@ -126,9 +139,13 @@ class CustomDataset(Dataset):
         Sagittal_T1 = np.zeros((256, 256, 15), dtype = np.uint8)
         Sagittal_T2_STIR = np.zeros((256, 256, 15), dtype = np.uint8)
         study_id = self.df_labels.iloc[index]['study_id']
+        if study_id in skip_study_id:
+            return self.__getitem__((index + 1) % len(self.df_labels))  # Try next item, wrap around if at end
         category = self.df_labels.iloc[index]['category']
         secondary_category = self.df_labels.iloc[index]['secondary_category']
-        sub_set = self.df[self.df['study_id'] == study_id, self.df['category'] == category or self.df['category'] == secondary_category]
+        sub_set = self.df[(self.df['study_id'] == study_id) & ((self.df['category'] == category) | (self.df['category'] == secondary_category))]
+        if len(sub_set) == 0:
+            return self.__getitem__((index + 1) % len(self.df_labels))
 
         for col in sub_set.columns:
             if col == "general_path_to_Axial":
@@ -140,43 +157,51 @@ class CustomDataset(Dataset):
                     list_of_files = self.unpad_images_list(list_of_files, 10)
                 for i, file in enumerate(list_of_files):
                     dcm = pydicom.dcmread(os.path.join(path, file))
-                    Axial_T2[..., i] = dcm.pixel_array
+                    # resize the image to 512x512
+                    new_pixel_array = self.resize_image(dcm.pixel_array, (512, 512))
+                    Axial_T2[..., i] = new_pixel_array
+
             elif col == "general_path_to_Sagittal_T1":
                 path = sub_set[col].iloc[0]
                 list_of_files = os.listdir(path)
                 middle_index = len(list_of_files) // 2
-                bboxes = segmentation.inference(list_of_files[middle_index])
+                bboxes = segmentation.inference(os.path.join(path, list_of_files[middle_index]))
                 if len(list_of_files) < 15:
                     list_of_files = self.pad_images_list(list_of_files, 15)
                 elif len(list_of_files) > 15:
                     list_of_files = self.unpad_images_list(list_of_files, 15)
-
                 for i, file in enumerate(list_of_files):
-                    self.center_crop(os.path.join(path, file), bboxes)
-                    Sagittal_T1[..., i] = dcm.pixel_array
+                    new_pixel_array = self.center_crop(os.path.join(path, file), bboxes)
+                    # resize the image to 256x256
+                    resized_pixel_array = self.resize_image(new_pixel_array, (256, 256))
+                    Sagittal_T1[..., i] = resized_pixel_array
+                    
+
             elif col == "general_path_to_Sagittal_T2_STIR":
                 path = sub_set[col].iloc[0]
                 list_of_files = os.listdir(path)
                 middle_index = len(list_of_files) // 2
-                bboxes = segmentation.inference(list_of_files[middle_index])
+                bboxes = segmentation.inference(os.path.join(path, list_of_files[middle_index]))
                 if len(list_of_files) < 15:
                     list_of_files = self.pad_images_list(list_of_files, 15)
                 elif len(list_of_files) > 15:
                     list_of_files = self.unpad_images_list(list_of_files, 15)
-
                 for i, file in enumerate(list_of_files):
-                    self.center_crop(os.path.join(path, file), bboxes)
-                    Sagittal_T2_STIR[..., i] = dcm.pixel_array
+                    new_pixel_array = self.center_crop(os.path.join(path, file), bboxes)
+                    # resize the image to 256x256
+                    resized_pixel_array = self.resize_image(new_pixel_array, (256, 256))
+                    Sagittal_T2_STIR[..., i] = resized_pixel_array
         
         if self.transform:
             Axial_T2 = self.transform(image=Axial_T2)['image']
             Sagittal_T1 = self.transform(image=Sagittal_T1)['image']
             Sagittal_T2_STIR = self.transform(image=Sagittal_T2_STIR)['image']
         
-        Axial_T2 = torch.tensor(Axial_T2).transpose(2, 0, 1)
-        Sagittal_T1 = torch.tensor(Sagittal_T1).transpose(2, 0, 1)
-        Sagittal_T2_STIR = torch.tensor(Sagittal_T2_STIR).transpose(2, 0, 1)
-        category_hot = F.one_hot(torch.tensor(category), num_classes=5)
+        Axial_T2 = torch.tensor(Axial_T2).permute(2, 0, 1)
+        Sagittal_T1 = torch.tensor(Sagittal_T1).permute(2, 0, 1)
+        Sagittal_T2_STIR = torch.tensor(Sagittal_T2_STIR).permute(2, 0, 1)
+
+        category_hot = F.one_hot(torch.tensor(category2id[category]), num_classes=5)
         labels = torch.tensor([label2id[self.df_labels.iloc[index]['spinal_canal_stenosis']],
                               label2id[self.df_labels.iloc[index]['left_neural_foraminal_narrowing']],
                               label2id[self.df_labels.iloc[index]['right_neural_foraminal_narrowing']],
@@ -184,3 +209,24 @@ class CustomDataset(Dataset):
                                 label2id[self.df_labels.iloc[index]['right_subarticular_stenosis']]], dtype=torch.float32)
 
         return Axial_T2, Sagittal_T1, Sagittal_T2_STIR, category_hot, labels
+
+
+def data_loader(train_data: Path, labels_path: Path) -> tuple[DataLoader, DataLoader]:
+    """
+    Loads and prepares the data for training and validation.
+
+    Args:
+        dir_csv_train (Path): The path to the training CSV file.
+        dir_csv_val (Path): The path to the validation CSV file.
+        batch_size (int): The batch size for training and validation.
+        ela (bool, optional): Whether to apply Error Level Analysis (ELA) transformation. Defaults to False.
+
+    Returns:
+        tuple: A tuple containing the training data loader and the validation data loader.
+    """
+    FAS_train = CustomDataset(train_data, labels_path, transforms_train)
+    # FAS_val = CustomDataset(dir_csv_val, transforms_val, ela)
+    
+    # train_loader = DataLoader(FAS_train, batch_size=batch_size, shuffle=True)
+    # val_loader = DataLoader(FAS_val, batch_size=batch_size, shuffle=True)
+    return FAS_train

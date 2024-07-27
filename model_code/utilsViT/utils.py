@@ -12,7 +12,7 @@ import shutil
 import torch
 import torch.nn as nn
 from sklearn.covariance import LedoitWolf
-from network.vit_16_base_feat_middle_gal_v2 import vit_base_patch16_224
+from model_code.network.vit_16_base_feat_middle_gal_v2 import vit_base_patch16_224
 import pdb
 
 
