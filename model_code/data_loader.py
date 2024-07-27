@@ -253,7 +253,7 @@ class CustomDataset(Dataset):
         
         # labels = torch.tensor([label0, label1, label2, label3, label4], dtype=torch.float32)
 
-        labels = torch.tensor(flattened_list, dtype=torch.float32)
+        labels = torch.tensor(flattened_list, dtype=torch.int16)
 
         return Axial_T2, Sagittal_T1, Sagittal_T2_STIR, category_hot, labels
 

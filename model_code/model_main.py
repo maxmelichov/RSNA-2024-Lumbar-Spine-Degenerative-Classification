@@ -267,7 +267,7 @@ class Abstract(ABC):
         print("Number of trainable parameters:", Abstract.count_parameters(self.model))
         scheduler = Abstract.get_scheduler_reduceOnPlateau(optimizer, mode='min', factor=0.1, patience=5, threshold=0.0001)
         weights = torch.tensor([1.0, 2.0, 4.0])
-        criterion = nn.CrossEntropyLoss(weight=weights.to(device))
+        criterion = nn.CrossEntropyLoss(weight=weights.to(device), ignore_index=-100)
         criterion = criterion.cuda()
         loss_fn, weights = [], []
         for loss_name, weight in {criterion:1}.items():
@@ -358,10 +358,7 @@ class Abstract(ABC):
                     attn_map_fake = torch.sigmoid(torch.mean(attn_map[fakeindex,:, 1:, 1:], dim=1))
                     # attn_map_fake = torch.mean(attn_map[fakeindex,:, 1:, 1:], dim=1)
 
-                    del attn_map
-                    
-                        
-                        
+                    del attn_map           
 
                     feat_patch_fake_inner = feat_patch_fake[:, min_threshold_H[0]:min_threshold_H[1], min_threshold[0]:min_threshold[1], :]
                     B, H, W, C = feat_patch_fake_inner.size()
@@ -377,7 +374,7 @@ class Abstract(ABC):
                             pred = classes[:,col*3:col*3+3]
                             
                             gt = labels[:,col*3:col*3+3]
-                            loss_dis += criterion(pred, gt) / 5
+                            loss_dis = loss_dis + criterion(pred, gt) / 5
 
                         ### for attetion correlation loss
                         loss_inter_frame = attention_loss(attn_map_real, attn_map_fake, index_map[fakeindex,:])
@@ -388,7 +385,7 @@ class Abstract(ABC):
                             pred = classes[:,col*3:col*3+3]
                             
                             gt = labels[:,col*3:col*3+3]
-                            loss_dis += criterion(pred, gt) / 5
+                            loss_dis = loss_dis + criterion(pred, gt) / 5
                         loss_dis_tatol = loss_dis
                     
                     loss_dis_tatol.backward()
