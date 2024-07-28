@@ -206,6 +206,7 @@ class Abstract(ABC):
         iter_per_epoch = len(val_loader)
         max_iter = self.opt.niter * iter_per_epoch
         with torch.no_grad():
+            loss_dis = 0.0
             validation_batch_losses = []
             progress_bar = tqdm(val_loader, desc='Validation', leave=False)
             for iter_num, (Axial_T2, Sagittal_T1, Sagittal_T2_STIR, category_hot, labels) in enumerate(progress_bar):
@@ -220,9 +221,19 @@ class Abstract(ABC):
                                              category_hot = category_hot, step=step, attn_blk=self.opt.attn_blk, feat_blk=self.opt.feat_blk,
                                              k=self.opt.k_weight, thr=self.opt.k_thr)
 
+                for col in range(5):
+                    pred = outputs[:,col*3:col*3+3]
+                    
+                    gt = labels[:,col*3:col*3+3]
+                    # Create a mask where all elements in the row are True if they match the target
+                    mask = (gt == torch.tensor([-100, -100, -100], device='cuda:0')).all(dim=1)
 
-                loss = loss_fn(outputs, labels)
-                validation_batch_losses.append(float(loss))
+                    # Use the mask to filter rows that do NOT match the target in both gt and pred
+                    gt = gt[~mask]
+                    pred = pred[~mask]
+                    loss_dis = loss_dis + loss_fn(pred, gt) / 5
+                loss_total = loss_dis
+                validation_batch_losses.append(float(loss_total))
                 mean_loss = statistics.mean(validation_batch_losses)
                 progress_bar.set_postfix({'loss':mean_loss})
         print("Validation Loss: ", mean_loss)
