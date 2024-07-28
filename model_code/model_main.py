@@ -24,12 +24,12 @@ from typing import Any
 import pandas as pd
 # from apex import amp
 
-from tensorboardX import SummaryWriter
+# from tensorboardX import SummaryWriter
 from torch.nn import DataParallel
 import time
 import json
 import torch.nn.functional as F
-from model_code.utils import WeightedLosses, AverageMeter
+from model_code.utils import WeightedLosses, AverageMeter, FocalLoss, FocalLossWithWeights
 from model_code.utilsViT.utils import Attention_Correlation_weight_reshape_loss, fit_inv_covariance, mahalanobis_distance
 from model_code.data_loader import data_loader
 from model_code.custom_model import CustomModel
@@ -189,19 +189,6 @@ class Abstract(ABC):
         return torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode=mode, factor=factor, patience=patience, threshold=threshold, verbose=True)
 
 
-    @staticmethod
-    def confident_strategy(pred, t:float = 0.5, batch_size: int = 32):
-        pred = np.array(pred)
-        sz = len(pred)
-        fakes = np.count_nonzero(pred > t)
-        # 11 frames are detected as fakes with high probability
-        if fakes > sz // 2.5 and fakes > np.round(batch_size*0.33):
-            return np.mean(pred[pred > t])
-        elif np.count_nonzero(pred < 0.2) > 0.9 * sz:
-            return np.mean(pred[pred < 0.2])
-        else:
-            return np.mean(pred)
-    
     def validate(self, loss_fn: nn.Module, val_loader: DataLoader) -> tuple[float, float]:
         """
         Validate the model on the validation set.
@@ -221,35 +208,25 @@ class Abstract(ABC):
         with torch.no_grad():
             validation_batch_losses = []
             progress_bar = tqdm(val_loader, desc='Validation', leave=False)
-            y_list, y_pred_list = [], []
             for iter_num, (Axial_T2, Sagittal_T1, Sagittal_T2_STIR, category_hot, labels) in enumerate(progress_bar):
-                raw = raw.cuda()
+                Axial_T2 = Axial_T2.cuda()
+                Sagittal_T1 = Sagittal_T1.cuda()
+                Sagittal_T2_STIR = Sagittal_T2_STIR.cuda()
+                category_hot = category_hot.cuda()
                 img_label = np.array(labels)
                 labels = labels.cuda().to(torch.float)
                 step = iter_num / max_iter
                 outputs, _, _ = self.model(Axial_T2 = Axial_T2, Sagittal_T1 = Sagittal_T1, Sagittal_T2_STIR = Sagittal_T2_STIR,
                                              category_hot = category_hot, step=step, attn_blk=self.opt.attn_blk, feat_blk=self.opt.feat_blk,
                                              k=self.opt.k_weight, thr=self.opt.k_thr)
-                predicted = F.softmax(outputs, dim=1).detach().cpu().tolist()
-                try:
-                    accuracy = roc_auc_score(img_label, predicted, average="micro")
-                except ValueError:
-                    pass
-                correct += accuracy
-                y_pred_list.append(predicted)
+
+
                 loss = loss_fn(outputs, labels)
                 validation_batch_losses.append(float(loss))
                 mean_loss = statistics.mean(validation_batch_losses)
-                number_steps += 1
-                progress_bar.set_postfix({'acc':100 * (correct / number_steps)})
-        val_acc = 100 * (correct / number_steps)
-        print("Validation Accuracy: ", 100 * accuracy_score(y_list, y_pred_list))
+                progress_bar.set_postfix({'loss':mean_loss})
         print("Validation Loss: ", mean_loss)
-        print("Validation Precision: ", 100 * precision_score(y_list, y_pred_list, labels=[0,1]))
-        print("Validation Recall: ", 100 * recall_score(y_list, y_pred_list, labels=[0,1]))
-        print("Validation F1 Score: ", 100 * f1_score(y_list, y_pred_list, labels=[0,1]))
-        Abstract.plot_confusion_matrix(y_list, y_pred_list, ['Real', 'Fake'], "validation")
-        return mean_loss, val_acc
+        return mean_loss
 
     def train(self) -> None:
         """
@@ -271,6 +248,7 @@ class Abstract(ABC):
         scheduler = Abstract.get_scheduler_reduceOnPlateau(optimizer, mode='min', factor=0.1, patience=5, threshold=0.0001)
         weights = torch.tensor([1.0, 2.0, 4.0])
         criterion = nn.CrossEntropyLoss(weight=weights.to(device))
+        # criterion = FocalLossWithWeights()
         criterion = criterion.cuda()
         loss_fn, weights = [], []
         for loss_name, weight in {criterion:1}.items():
@@ -280,7 +258,7 @@ class Abstract(ABC):
         # summary_writer = SummaryWriter(self.name + "_logs" + str(time.strftime("%Y.%m.%d.%H.%M.%S", time.localtime())))
         loss_functions = {"classifier_loss": weightedloss}
         train_losses, train_accs = [],[]
-        best_val_acc = 0.0
+        best_valid_loss = 0.0
         early_stopping_counter = 0
         
         feat_tensorlist = []
@@ -378,8 +356,12 @@ class Abstract(ABC):
                             pred = classes[:,col*3:col*3+3]
                             
                             gt = labels[:,col*3:col*3+3]
-                            if torch.all(gt.eq(torch.tensor([-100, -100, -100], device='cuda:0'))):
-                                continue
+                            # Create a mask where all elements in the row are True if they match the target
+                            mask = (gt == torch.tensor([-100, -100, -100], device='cuda:0')).all(dim=1)
+
+                            # Use the mask to filter rows that do NOT match the target in both gt and pred
+                            gt = gt[~mask]
+                            pred = pred[~mask]
                             loss_dis = loss_dis + criterion(pred, gt) / 5
 
                         ### for attetion correlation loss
@@ -391,8 +373,12 @@ class Abstract(ABC):
                             pred = classes[:,col*3:col*3+3]
                             
                             gt = labels[:,col*3:col*3+3]
-                            if torch.all(gt.eq(torch.tensor([-100, -100, -100], device='cuda:0'))):
-                                continue
+                            # Create a mask where all elements in the row are True if they match the target
+                            mask = (gt == torch.tensor([-100, -100, -100], device='cuda:0')).all(dim=1)
+
+                            # Use the mask to filter rows that do NOT match the target in both gt and pred
+                            gt = gt[~mask]
+                            pred = pred[~mask]
                             loss_dis = loss_dis + criterion(pred, gt) / 5
                         loss_dis_tatol = loss_dis
                     
@@ -400,37 +386,26 @@ class Abstract(ABC):
                     torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
                     optimizer.step()
                     optimizer.zero_grad()
-                    output_pred = F.softmax(classes, dim=1).detach().cpu().tolist()
-                    try:
-                        accuracy = roc_auc_score(img_label, output_pred, average="micro")
-                    except ValueError:
-                        pass
-                    correct += accuracy
                     running_loss += loss_dis_tatol.item()
                     number_steps += 1
                     losses.update(loss_dis_tatol.item())
-                    progress_bar.set_postfix({'epoch': current_epoch, 'loss': losses.avg, 'acc': 100 * (correct / number_steps)})
+                    progress_bar.set_postfix({'epoch': current_epoch, 'loss': losses.avg})
                 torch.cuda.synchronize()
                 train_losses.append(running_loss / (len(train_loader) * self.batch_size))
                 train_accs.append(100 * (correct / number_steps))
-                valid_loss, valid_acc = self.validate(loss_functions["classifier_loss"], val_loader)
+                valid_loss = self.validate(loss_functions["classifier_loss"], val_loader)
                 scheduler.step(valid_loss)
                 print("Last LR", scheduler.get_last_lr())
-                print('Train Accuracy: {:.2f}%'.format(100 * (correct / number_steps)))
                 print('Train Loss: {:.4f}'.format(losses.avg))
-                print("Precision: ", precision_score(y_list, y_pred_list, labels=[0,1]))
-                print("Recall: ", recall_score(y_list, y_pred_list, labels=[0,1]))
-                print("F1 Score: ", f1_score(y_list, y_pred_list, labels=[0,1]))
                 print('--------------------------------')
-                Abstract.plot_confusion_matrix(y_list, y_pred_list, ['Real', 'Fake'], "train")
                 # summary_writer.add_scalar('train loss', float(losses.avg), global_step=current_epoch)
                 # summary_writer.add_scalar('train acc', float(100*(correct/number_steps)), global_step=current_epoch)
                 # summary_writer.add_scalar('validation loss', float(valid_loss), global_step=current_epoch)
                 # summary_writer.add_scalar('validation acc', float(valid_acc), global_step=current_epoch)
                 # Check for overfitting
-                if valid_acc > best_val_acc:
-                    best_val_acc = valid_acc
-                    self.Validation_Accuracy = valid_acc
+                if valid_loss > best_valid_loss:
+                    best_val_acc = valid_loss
+                    self.Validation_loss = best_val_acc
                     
                 else:
                     early_stopping_counter += 1
@@ -439,11 +414,11 @@ class Abstract(ABC):
                     print("Early stopping due to overfitting")
                     break
                 
-                if self.save_wieghts and (early_stopping_counter == 0 or valid_acc > best_val_acc):
+                if self.save_wieghts and (early_stopping_counter == 0 or valid_loss > best_valid_loss):
                     self.save_model(self.model, self.name + "_best_validation.pt")
             # self.plot_metrics(losses, accs, val_losses, val_acc)
             if self.save_wieghts:
-                os.rename(self.name + "_best_validation.pt", self.name + "_"+ str(self.Validation_Accuracy) + ".pt")
+                os.rename(self.name + "_best_validation.pt", self.name + "_"+ str(self.Validation_loss) + ".pt")
 
     @staticmethod
     def plot_confusion_matrix(y_true, y_pred, classes, type_) -> None:

@@ -10,6 +10,8 @@ from preprocessing.segmantation_inference import SegmentaionInference, classes_o
 import torch.nn.functional as F
 from pathlib import Path
 import scipy.ndimage
+import matplotlib.pyplot as plt
+import re
 segmentation = SegmentaionInference(model_path=r"weights\simple_unet.pth")
 label2id = {'Normal/Mild': 0, 'Moderate':1, 'Severe':2}
 category2id = {"L1": 0, "L2": 1, "L3": 2, "L4": 3, "L5": 4}
@@ -93,11 +95,11 @@ class CustomDataset(Dataset):
         min_x, max_x = 999999, -1
         min_y, max_y = 999999, -1
         list_of_bboxes = [boxes[0] for boxes in bboxes.values()]
-        for x, y, _, _ in list_of_bboxes:
+        for x, y, h, w in list_of_bboxes:
             min_x = min(min_x, x)
-            max_x = max(max_x, x)
+            max_x = max(max_x, x+w)
             min_y = min(min_y, y)
-            max_y = max(max_y, y)
+            max_y = max(max_y, y+h)
         original_dicom = pydicom.dcmread(dcm_path)
         pixel_array = original_dicom.pixel_array
         
@@ -106,9 +108,6 @@ class CustomDataset(Dataset):
 
         # Crop the image using the calculated bounding box
         cropped_image_array = np.array(image.crop((min_x, min_y, max_x + 1, max_y + 1)))
-
-        # Ensure the data type matches the original DICOM's pixel array
-        cropped_image_array = cropped_image_array.astype(pixel_array.dtype)
         return cropped_image_array
 
     @staticmethod
@@ -147,10 +146,16 @@ class CustomDataset(Dataset):
         if len(sub_set) == 0:
             return self.__getitem__((index + 1) % len(self.df_labels))
 
+
+        def extract_number(filename):
+            match = re.search(r'\d+', filename)
+            return int(match.group()) if match else 0
+        
         for col in sub_set.columns:
             if col == "general_path_to_Axial":
                 path = sub_set[col].iloc[0]
                 list_of_files = os.listdir(path)
+                list_of_files = sorted(list_of_files, key=extract_number)
                 if len(list_of_files) < 10:
                     list_of_files = self.pad_images_list(list_of_files, 10)
                 elif len(list_of_files) > 10:
@@ -164,6 +169,7 @@ class CustomDataset(Dataset):
             elif col == "general_path_to_Sagittal_T1":
                 path = sub_set[col].iloc[0]
                 list_of_files = os.listdir(path)
+                list_of_files = sorted(list_of_files, key=extract_number)
                 middle_index = len(list_of_files) // 2
                 bboxes = segmentation.inference(os.path.join(path, list_of_files[middle_index]))
                 if len(list_of_files) < 15:
@@ -177,9 +183,10 @@ class CustomDataset(Dataset):
                     Sagittal_T1[..., i] = resized_pixel_array
                     
 
-            elif col == "general_path_to_Sagittal_T2_STIR":
+            elif col == "general_path_to_Sagittal_T2":
                 path = sub_set[col].iloc[0]
                 list_of_files = os.listdir(path)
+                list_of_files = sorted(list_of_files, key=extract_number)
                 middle_index = len(list_of_files) // 2
                 bboxes = segmentation.inference(os.path.join(path, list_of_files[middle_index]))
                 if len(list_of_files) < 15:
@@ -191,7 +198,6 @@ class CustomDataset(Dataset):
                     # resize the image to 256x256
                     resized_pixel_array = self.resize_image(new_pixel_array, (256, 256))
                     Sagittal_T2_STIR[..., i] = resized_pixel_array
-        
         if self.transform:
             Axial_T2 = self.transform(image=Axial_T2)['image']
             Sagittal_T1 = self.transform(image=Sagittal_T1)['image']
@@ -230,6 +236,7 @@ class CustomDataset(Dataset):
         
         flattened_list = [item for sublist in [label0, label1, label2, label3, label4] for item in sublist]
 
+        labels = torch.tensor(flattened_list, dtype=torch.float32)
         # if type(self.df_labels.iloc[index]['spinal_canal_stenosis']) == float:
         #     label0 = -100
         # else:
@@ -252,8 +259,6 @@ class CustomDataset(Dataset):
         #     label4 = torch.tensor(label2id[self.df_labels.iloc[index]['right_subarticular_stenosis']])
         
         # labels = torch.tensor([label0, label1, label2, label3, label4], dtype=torch.float32)
-
-        labels = torch.tensor(flattened_list, dtype=torch.float32)
 
         return Axial_T2, Sagittal_T1, Sagittal_T2_STIR, category_hot, labels
 
