@@ -2,7 +2,6 @@ from torchvision import models
 import torch
 import os
 import sys
-from torch.utils.data import DataLoader
 from abc import ABC
 from pathlib import Path
 from tqdm import tqdm
@@ -467,15 +466,15 @@ class Abstract(ABC):
         with torch.no_grad():
             losses = AverageMeter() 
             progress_bar = tqdm(val_loader, desc='Validation', leave=False)
-            for (x, category_hot, labels) in progress_bar:
-                # Axial_T2 = Axial_T2.cuda()
-                # Sagittal_T1 = Sagittal_T1.cuda()
-                # Sagittal_T2_STIR = Sagittal_T2_STIR.cuda()
-                x = x.cuda()
+            for (Axial_T2, Sagittal_T1, Sagittal_T2_STIR, category_hot, labels) in progress_bar:
+                Axial_T2 = Axial_T2.cuda()
+                Sagittal_T1 = Sagittal_T1.cuda()
+                Sagittal_T2_STIR = Sagittal_T2_STIR.cuda()
+                # x = x.cuda()
                 category_hot = category_hot.cuda()
                 labels = labels.cuda()
                 with autocast:
-                    outputs = self.model(x = x, category_hot = category_hot)
+                    outputs = self.model(Axial_T2 = Axial_T2, Sagittal_T1 = Sagittal_T1, Sagittal_T2_STIR = Sagittal_T2_STIR, category_hot = category_hot)
                     loss_dis = 0.0
                     for col in range(5):
                         pred = outputs[:,col*3:col*3+3]
@@ -542,21 +541,21 @@ class Abstract(ABC):
                 running_loss = 0.0
                 progress_bar = tqdm(train_loader, desc='Training', leave=False)
                 losses = AverageMeter() 
-                for (x, category_hot, labels) in progress_bar:
+                for (Axial_T2, Sagittal_T1, Sagittal_T2_STIR, category_hot, labels) in progress_bar:
                    
 
                     
                     self.model.train(True)
-                    # Axial_T2 = Axial_T2.cuda()
-                    # Sagittal_T1 = Sagittal_T1.cuda()
-                    # Sagittal_T2_STIR = Sagittal_T2_STIR.cuda()
-                    x = x.cuda()
+                    Axial_T2 = Axial_T2.cuda()
+                    Sagittal_T1 = Sagittal_T1.cuda()
+                    Sagittal_T2_STIR = Sagittal_T2_STIR.cuda()
+                    # x = x.cuda()
                     category_hot = category_hot.cuda()
                     labels = labels.cuda()
                     optimizer.zero_grad()
                     loss_dis = 0.0
                     with autocast:
-                        outputs = self.model(x = x, category_hot = category_hot)  
+                        outputs = self.model(Axial_T2 = Axial_T2, Sagittal_T1 = Sagittal_T1, Sagittal_T2_STIR = Sagittal_T2_STIR, category_hot = category_hot)
                         for col in range(5):
                             pred = outputs[:,col*3:col*3+3]
                             

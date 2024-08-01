@@ -178,9 +178,9 @@ class CustomDataset(Dataset):
                 path = sub_set[col].iloc[0]
                 list_of_files = os.listdir(path)
                 list_of_files = sorted(list_of_files, key=extract_number)
-                # middle_index = len(list_of_files) // 2
-                # bboxes = segmentation.inference(os.path.join(path, list_of_files[middle_index]))
-                bboxes = self._get_bbox(index, "T1")
+                middle_index = len(list_of_files) // 2
+                bboxes = segmentation.inference(os.path.join(path, list_of_files[middle_index]))
+                # bboxes = self._get_bbox(index, "T1")
                 if len(list_of_files) < 10:
                     list_of_files = self.pad_images_list(list_of_files, 10)
                 elif len(list_of_files) > 10:
@@ -196,12 +196,12 @@ class CustomDataset(Dataset):
                 path = sub_set[col].iloc[0]
                 list_of_files = os.listdir(path)
                 list_of_files = sorted(list_of_files, key=extract_number)
-                # middle_index = len(list_of_files) // 2
-                # bboxes = segmentation.inference(os.path.join(path, list_of_files[middle_index]))
-                bboxes = self._get_bbox(index, "T2")
-                if len(list_of_files) < 3:
+                middle_index = len(list_of_files) // 2
+                bboxes = segmentation.inference(os.path.join(path, list_of_files[middle_index]))
+                # bboxes = self._get_bbox(index, "T2")
+                if len(list_of_files) < 10:
                     list_of_files = self.pad_images_list(list_of_files, 10)
-                elif len(list_of_files) > 3:
+                elif len(list_of_files) > 10:
                     list_of_files = self.unpad_images_list(list_of_files, 10)
                 for i, file in enumerate(list_of_files):
                     new_pixel_array = self.center_crop(os.path.join(path, file), bboxes)
@@ -235,17 +235,17 @@ class CustomDataset(Dataset):
                 #     new_pixel_array = self.resize_image(dcm.pixel_array, (512, 512))
                 #     Axial_T2[..., i] = new_pixel_array
 
-        x = np.concatenate([Sagittal_T1, Sagittal_T2_STIR, Axial_T2], axis=2)
+        # x = np.concatenate([Sagittal_T1, Sagittal_T2_STIR, Axial_T2], axis=2)
         if self.transform:
-            # Axial_T2 = self.transform(image=Axial_T2)['image']
-            # Sagittal_T1 = self.transform(image=Sagittal_T1)['image']
-            # Sagittal_T2_STIR = self.transform(image=Sagittal_T2_STIR)['image']
-            x = self.transform(image=x)['image']
+            Axial_T2 = self.transform(image=Axial_T2)['image']
+            Sagittal_T1 = self.transform(image=Sagittal_T1)['image']
+            Sagittal_T2_STIR = self.transform(image=Sagittal_T2_STIR)['image']
+            # x = self.transform(image=x)['image']
         
-        x = torch.tensor(x).permute(2, 0, 1)
-        # Axial_T2 = torch.tensor(Axial_T2).permute(2, 0, 1)
-        # Sagittal_T1 = torch.tensor(Sagittal_T1).permute(2, 0, 1)
-        # Sagittal_T2_STIR = torch.tensor(Sagittal_T2_STIR).permute(2, 0, 1)
+        # x = torch.tensor(x).permute(2, 0, 1)
+        Axial_T2 = torch.tensor(Axial_T2).permute(2, 0, 1)
+        Sagittal_T1 = torch.tensor(Sagittal_T1).permute(2, 0, 1)
+        Sagittal_T2_STIR = torch.tensor(Sagittal_T2_STIR).permute(2, 0, 1)
 
         category_hot = F.one_hot(torch.tensor(category2id[category]), num_classes=5)
 
@@ -299,7 +299,7 @@ class CustomDataset(Dataset):
             label4 = torch.tensor(label2id[self.df_labels.iloc[index]['right_subarticular_stenosis']])
         
         labels = torch.tensor([label0, label1, label2, label3, label4], dtype=torch.int64)
-        return x, category_hot, labels
+        return Axial_T2, Sagittal_T1, Sagittal_T2_STIR, category_hot, labels
 
 
 def data_loader(train_data: Path, labels_path: Path) -> tuple[DataLoader, DataLoader]:

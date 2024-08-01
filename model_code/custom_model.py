@@ -34,20 +34,20 @@ class CustomModel(nn.Module):
 class CustomModel2(nn.Module):
     def __init__(self, num_classes=5):
         super(CustomModel2, self).__init__()
-        self.EfficientNet_model_Sagittal_T1 = EfficientNet.from_pretrained('efficientnet-b5', in_channels= 3)
-        self.EfficientNet_model_Axial_T2 = EfficientNet.from_pretrained('efficientnet-b5', in_channels= 10)
-        self.EfficientNet_model_Sagittal_T2_STIR = EfficientNet.from_pretrained('efficientnet-b5' , in_channels= 3)
+        self.EfficientNet_model_Sagittal_T1 = EfficientNet.from_pretrained('efficientnet-b0', in_channels= 10)
+        self.EfficientNet_model_Axial_T2 = EfficientNet.from_pretrained('efficientnet-b0', in_channels= 10)
+        self.EfficientNet_model_Sagittal_T2_STIR = EfficientNet.from_pretrained('efficientnet-b0' , in_channels= 10)
         self.densenet121 = timm.create_model(
-                                    "densenet121",
+                                    "timm/davit_tiny.msft_in1k",
                                     pretrained=True, 
                                     features_only=False,
-                                    in_chans=120,
-                                    num_classes=251,
+                                    in_chans=72,
+                                    num_classes=59,
                                     global_pool='avg'
                                     )
-        self.fc1 = nn.Linear(251 + 5, 128)  # First fully connected layer
-        self.relu = nn.SELU()               # Activation function
-        self.fc2 = nn.Linear(128, num_classes)  # Second fully connected layer
+        self.fc1 = nn.Linear(64, 32)  # First fully connected layer
+        self.relu = nn.SELU()              # Activation function
+        self.fc2 = nn.Linear(32, num_classes)  # Second fully connected layer
 
     def forward(self, Sagittal_T1, Axial_T2, Sagittal_T2_STIR, category_hot):
         '''
@@ -63,6 +63,7 @@ class CustomModel2(nn.Module):
         Sagittal_T2_STIR = Sagittal_T2_STIR['reduction_2']
         Concatinate = torch.cat((Sagittal_T1, Axial_T2, Sagittal_T2_STIR), 1)
         x = self.densenet121(Concatinate)
+        # print(x.shape, category_hot.shape)
         x = torch.cat((x, category_hot), 1)
         x = self.fc1(x)
         x = self.relu(x)
