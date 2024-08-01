@@ -12,6 +12,7 @@ from pathlib import Path
 import scipy.ndimage
 import matplotlib.pyplot as plt
 import re
+import ast
 segmentation = SegmentaionInference(model_path=r"weights\simple_unet.pth")
 label2id = {'Normal/Mild': 0, 'Moderate':1, 'Severe':2}
 category2id = {"L1": 0, "L2": 1, "L3": 2, "L4": 3, "L5": 4}
@@ -96,16 +97,19 @@ class CustomDataset(Dataset):
         min_y, max_y = 999999, -1
         list_of_bboxes = [boxes[0] for boxes in bboxes.values()]
         for x, y, h, w in list_of_bboxes:
+            if x == -1 and y == -1 and h == -1 and w == -1:
+                continue
             min_x = min(min_x, x)
             max_x = max(max_x, x+w)
             min_y = min(min_y, y)
             max_y = max(max_y, y+h)
+        if min_x == 999999:
+            min_x, min_y, max_x, max_y = 0, 0, 512, 512
         original_dicom = pydicom.dcmread(dcm_path)
         pixel_array = original_dicom.pixel_array
         
         # Convert DICOM pixel array to PIL image
         image = Image.fromarray(pixel_array)
-
         # Crop the image using the calculated bounding box
         cropped_image_array = np.array(image.crop((min_x, min_y, max_x + 1, max_y + 1)))
         return cropped_image_array
@@ -123,27 +127,45 @@ class CustomDataset(Dataset):
 
     @staticmethod
     def resize_image(pixel_array, new_size):
-        return scipy.ndimage.zoom(pixel_array, (new_size[0]/pixel_array.shape[0], new_size[1]/pixel_array.shape[1]), order=3)  # order=3 for bicubic
-        # if pixel_array.shape == new_size:
-        #     return pixel_array
+        # return scipy.ndimage.zoom(pixel_array, (new_size[0]/pixel_array.shape[0], new_size[1]/pixel_array.shape[1]), order=3)  # order=3 for bicubic
+        if pixel_array.shape == new_size:
+            return pixel_array
         # elif pixel_array.shape[0] > new_size[0] or pixel_array.shape[1] > new_size[1]:
         #     return scipy.ndimage.zoom(pixel_array, (new_size[0]/pixel_array.shape[0], new_size[1]/pixel_array.shape[1]), order=3)
-        # else:
-        #     image = Image.fromarray(pixel_array)
-        #     return image.resize((512, 512), Image.LANCZOS)  # You can use Image.LANCZOS for potentially better quality
+        else:
+            pixel_array = (pixel_array - pixel_array.min()) / (pixel_array.max() - pixel_array.min() + 1e-6) * 255
+            image = Image.fromarray(pixel_array)
+            return image.resize((512, 512))
 
+    def _get_bbox(self, index, type_name):
+        bboxes = {}
+        try:
+            bboxes[1] = ast.literal_eval(self.df.iloc[index][f"1_{type_name}"])
+            bboxes[2] = ast.literal_eval(self.df.iloc[index][f"2_{type_name}"])
+            bboxes[3] = ast.literal_eval(self.df.iloc[index][f"3_{type_name}"])
+            bboxes[4] = ast.literal_eval(self.df.iloc[index][f"4_{type_name}"])
+            bboxes[5] = ast.literal_eval(self.df.iloc[index][f"5_{type_name}"])
+            bboxes[11] = ast.literal_eval(self.df.iloc[index][f"11_{type_name}"])
+            bboxes[12] = ast.literal_eval(self.df.iloc[index][f"12_{type_name}"])
+            bboxes[13] = ast.literal_eval(self.df.iloc[index][f"13_{type_name}"])
+            bboxes[14] = ast.literal_eval(self.df.iloc[index][f"14_{type_name}"])
+            bboxes[15] = ast.literal_eval(self.df.iloc[index][f"15_{type_name}"])
+        except:
+            pass
+        return bboxes
 
     def __getitem__(self, index):
         Axial_T2 = np.zeros((512, 512, 10), dtype = np.uint8)
-        Sagittal_T1 = np.zeros((256, 256, 15), dtype = np.uint8)
-        Sagittal_T2_STIR = np.zeros((256, 256, 15), dtype = np.uint8)
+        Sagittal_T1 = np.zeros((512, 512, 10), dtype = np.uint8)
+        Sagittal_T2_STIR = np.zeros((512, 512, 10), dtype = np.uint8)
+        x = np.zeros((512, 512, 30), dtype = np.uint8)
         study_id = self.df_labels.iloc[index]['study_id']
         if study_id in skip_study_id:
             return self.__getitem__((index + 1) % len(self.df_labels))  # Try next item, wrap around if at end
         category = self.df_labels.iloc[index]['category']
         secondary_category = self.df_labels.iloc[index]['secondary_category']
         sub_set = self.df[(self.df['study_id'] == study_id) & ((self.df['category'] == category) | (self.df['category'] == secondary_category))]
-        if len(sub_set) == 0:
+        if len(sub_set) == 0 or "None" in sub_set["general_path_to_Sagittal_T1"].iloc[0].split("\\") or "None" in sub_set["general_path_to_Sagittal_T2"].iloc[0].split("\\") or "None" in sub_set["general_path_to_Axial"].iloc[0].split("\\"):
             return self.__getitem__((index + 1) % len(self.df_labels))
 
 
@@ -152,34 +174,21 @@ class CustomDataset(Dataset):
             return int(match.group()) if match else 0
         
         for col in sub_set.columns:
-            if col == "general_path_to_Axial":
+            if col == "general_path_to_Sagittal_T1":
                 path = sub_set[col].iloc[0]
                 list_of_files = os.listdir(path)
                 list_of_files = sorted(list_of_files, key=extract_number)
+                # middle_index = len(list_of_files) // 2
+                # bboxes = segmentation.inference(os.path.join(path, list_of_files[middle_index]))
+                bboxes = self._get_bbox(index, "T1")
                 if len(list_of_files) < 10:
                     list_of_files = self.pad_images_list(list_of_files, 10)
                 elif len(list_of_files) > 10:
                     list_of_files = self.unpad_images_list(list_of_files, 10)
                 for i, file in enumerate(list_of_files):
-                    dcm = pydicom.dcmread(os.path.join(path, file))
-                    # resize the image to 512x512
-                    new_pixel_array = self.resize_image(dcm.pixel_array, (512, 512))
-                    Axial_T2[..., i] = new_pixel_array
-
-            elif col == "general_path_to_Sagittal_T1":
-                path = sub_set[col].iloc[0]
-                list_of_files = os.listdir(path)
-                list_of_files = sorted(list_of_files, key=extract_number)
-                middle_index = len(list_of_files) // 2
-                bboxes = segmentation.inference(os.path.join(path, list_of_files[middle_index]))
-                if len(list_of_files) < 15:
-                    list_of_files = self.pad_images_list(list_of_files, 15)
-                elif len(list_of_files) > 15:
-                    list_of_files = self.unpad_images_list(list_of_files, 15)
-                for i, file in enumerate(list_of_files):
                     new_pixel_array = self.center_crop(os.path.join(path, file), bboxes)
                     # resize the image to 256x256
-                    resized_pixel_array = self.resize_image(new_pixel_array, (256, 256))
+                    resized_pixel_array = self.resize_image(new_pixel_array, (512, 512))
                     Sagittal_T1[..., i] = resized_pixel_array
                     
 
@@ -187,80 +196,110 @@ class CustomDataset(Dataset):
                 path = sub_set[col].iloc[0]
                 list_of_files = os.listdir(path)
                 list_of_files = sorted(list_of_files, key=extract_number)
-                middle_index = len(list_of_files) // 2
-                bboxes = segmentation.inference(os.path.join(path, list_of_files[middle_index]))
-                if len(list_of_files) < 15:
-                    list_of_files = self.pad_images_list(list_of_files, 15)
-                elif len(list_of_files) > 15:
-                    list_of_files = self.unpad_images_list(list_of_files, 15)
+                # middle_index = len(list_of_files) // 2
+                # bboxes = segmentation.inference(os.path.join(path, list_of_files[middle_index]))
+                bboxes = self._get_bbox(index, "T2")
+                if len(list_of_files) < 3:
+                    list_of_files = self.pad_images_list(list_of_files, 10)
+                elif len(list_of_files) > 3:
+                    list_of_files = self.unpad_images_list(list_of_files, 10)
                 for i, file in enumerate(list_of_files):
                     new_pixel_array = self.center_crop(os.path.join(path, file), bboxes)
                     # resize the image to 256x256
-                    resized_pixel_array = self.resize_image(new_pixel_array, (256, 256))
+                    resized_pixel_array = self.resize_image(new_pixel_array, (512, 512))
                     Sagittal_T2_STIR[..., i] = resized_pixel_array
+
+            elif col == "general_path_to_Axial":
+                path = sub_set[col].iloc[0]
+                list_of_files = os.listdir(path)
+                axt2 = sorted(list_of_files, key=extract_number)
+                step = len(axt2) / 10.0
+                st = len(axt2)/2.0 - 4.0*step
+                end = len(axt2)+0.0001
+                for i, j in enumerate(np.arange(st, end, step)):
+                    try:
+                        p = axt2[max(0, int((j-0.5001).round()))]
+                        dcm = pydicom.dcmread(os.path.join(path, p))
+                        new_pixel_array = self.resize_image(dcm.pixel_array, (512, 512))
+                        Axial_T2[..., i] = new_pixel_array
+                    except:
+                    #print(f'failed to load on {st_id}, Sagittal T2/STIR')
+                        pass 
+                # if len(list_of_files) < 10:
+                #     list_of_files = self.pad_images_list(list_of_files, 10)
+                # elif len(list_of_files) > 10:
+                #     list_of_files = self.unpad_images_list(list_of_files, 10)
+                # for i, file in enumerate(list_of_files):
+                #     dcm = pydicom.dcmread(os.path.join(path, file))
+                #     # resize the image to 512x512
+                #     new_pixel_array = self.resize_image(dcm.pixel_array, (512, 512))
+                #     Axial_T2[..., i] = new_pixel_array
+
+        x = np.concatenate([Sagittal_T1, Sagittal_T2_STIR, Axial_T2], axis=2)
         if self.transform:
-            Axial_T2 = self.transform(image=Axial_T2)['image']
-            Sagittal_T1 = self.transform(image=Sagittal_T1)['image']
-            Sagittal_T2_STIR = self.transform(image=Sagittal_T2_STIR)['image']
+            # Axial_T2 = self.transform(image=Axial_T2)['image']
+            # Sagittal_T1 = self.transform(image=Sagittal_T1)['image']
+            # Sagittal_T2_STIR = self.transform(image=Sagittal_T2_STIR)['image']
+            x = self.transform(image=x)['image']
         
-        Axial_T2 = torch.tensor(Axial_T2).permute(2, 0, 1)
-        Sagittal_T1 = torch.tensor(Sagittal_T1).permute(2, 0, 1)
-        Sagittal_T2_STIR = torch.tensor(Sagittal_T2_STIR).permute(2, 0, 1)
+        x = torch.tensor(x).permute(2, 0, 1)
+        # Axial_T2 = torch.tensor(Axial_T2).permute(2, 0, 1)
+        # Sagittal_T1 = torch.tensor(Sagittal_T1).permute(2, 0, 1)
+        # Sagittal_T2_STIR = torch.tensor(Sagittal_T2_STIR).permute(2, 0, 1)
 
         category_hot = F.one_hot(torch.tensor(category2id[category]), num_classes=5)
 
-        if type(self.df_labels.iloc[index]['spinal_canal_stenosis']) == float:
-            label0 = [-100, -100, -100]
-        else:
-            label0 = F.one_hot(torch.tensor(label2id[self.df_labels.iloc[index]['spinal_canal_stenosis']]), num_classes=3)
-        
-        if type(self.df_labels.iloc[index]['left_neural_foraminal_narrowing']) == float:
-            label1 =[-100, -100, -100]
-        else:
-            label1 = F.one_hot(torch.tensor(label2id[self.df_labels.iloc[index]['left_neural_foraminal_narrowing']]), num_classes=3)
-        
-        if type(self.df_labels.iloc[index]['right_neural_foraminal_narrowing']) == float:
-            label2 = [-100, -100, -100]
-        else:
-            label2 = F.one_hot(torch.tensor(label2id[self.df_labels.iloc[index]['right_neural_foraminal_narrowing']]), num_classes=3)
-
-        if type(self.df_labels.iloc[index]['left_subarticular_stenosis']) == float:
-            label3 = [-100, -100, -100]
-        else:
-            label3 = F.one_hot(torch.tensor(label2id[self.df_labels.iloc[index]['left_subarticular_stenosis']]), num_classes=3)
-        
-        if type(self.df_labels.iloc[index]['right_subarticular_stenosis']) == float:
-            label4 = [-100, -100, -100]
-        else:
-            label4 = F.one_hot(torch.tensor(label2id[self.df_labels.iloc[index]['right_subarticular_stenosis']]), num_classes=3)
-        
-        flattened_list = [item for sublist in [label0, label1, label2, label3, label4] for item in sublist]
-
-        labels = torch.tensor(flattened_list, dtype=torch.float32)
         # if type(self.df_labels.iloc[index]['spinal_canal_stenosis']) == float:
-        #     label0 = -100
+        #     label0 = [-100, -100, -100]
         # else:
-        #     label0 = torch.tensor(label2id[self.df_labels.iloc[index]['spinal_canal_stenosis']])
-        # if type(self.df_labels.iloc[index]['left_neural_foraminal_narrowing']) == float:
-        #     label1 = -100
-        # else:
-        #     label1 = torch.tensor(label2id[self.df_labels.iloc[index]['left_neural_foraminal_narrowing']])
-        # if type(self.df_labels.iloc[index]['right_neural_foraminal_narrowing']) == float:
-        #     label2 = -100
-        # else:
-        #     label2 = torch.tensor(label2id[self.df_labels.iloc[index]['right_neural_foraminal_narrowing']])
-        # if type(self.df_labels.iloc[index]['left_subarticular_stenosis']) == float:
-        #     label3 = -100
-        # else:
-        #     label3 = torch.tensor(label2id[self.df_labels.iloc[index]['left_subarticular_stenosis']])
-        # if type(self.df_labels.iloc[index]['right_subarticular_stenosis']) == float:
-        #     label4 = -100
-        # else:
-        #     label4 = torch.tensor(label2id[self.df_labels.iloc[index]['right_subarticular_stenosis']])
+        #     label0 = F.one_hot(torch.tensor(label2id[self.df_labels.iloc[index]['spinal_canal_stenosis']]), num_classes=3)
         
-        # labels = torch.tensor([label0, label1, label2, label3, label4], dtype=torch.float32)
+        # if type(self.df_labels.iloc[index]['left_neural_foraminal_narrowing']) == float:
+        #     label1 =[-100, -100, -100]
+        # else:
+        #     label1 = F.one_hot(torch.tensor(label2id[self.df_labels.iloc[index]['left_neural_foraminal_narrowing']]), num_classes=3)
+        
+        # if type(self.df_labels.iloc[index]['right_neural_foraminal_narrowing']) == float:
+        #     label2 = [-100, -100, -100]
+        # else:
+        #     label2 = F.one_hot(torch.tensor(label2id[self.df_labels.iloc[index]['right_neural_foraminal_narrowing']]), num_classes=3)
 
-        return Axial_T2, Sagittal_T1, Sagittal_T2_STIR, category_hot, labels
+        # if type(self.df_labels.iloc[index]['left_subarticular_stenosis']) == float:
+        #     label3 = [-100, -100, -100]
+        # else:
+        #     label3 = F.one_hot(torch.tensor(label2id[self.df_labels.iloc[index]['left_subarticular_stenosis']]), num_classes=3)
+        
+        # if type(self.df_labels.iloc[index]['right_subarticular_stenosis']) == float:
+        #     label4 = [-100, -100, -100]
+        # else:
+        #     label4 = F.one_hot(torch.tensor(label2id[self.df_labels.iloc[index]['right_subarticular_stenosis']]), num_classes=3)
+        
+        # flattened_list = [item for sublist in [label0, label1, label2, label3, label4] for item in sublist]
+
+        # labels = torch.tensor(flattened_list, dtype=torch.float32)
+        if type(self.df_labels.iloc[index]['spinal_canal_stenosis']) == float:
+            label0 = -100
+        else:
+            label0 = torch.tensor(label2id[self.df_labels.iloc[index]['spinal_canal_stenosis']])
+        if type(self.df_labels.iloc[index]['left_neural_foraminal_narrowing']) == float:
+            label1 = -100
+        else:
+            label1 = torch.tensor(label2id[self.df_labels.iloc[index]['left_neural_foraminal_narrowing']])
+        if type(self.df_labels.iloc[index]['right_neural_foraminal_narrowing']) == float:
+            label2 = -100
+        else:
+            label2 = torch.tensor(label2id[self.df_labels.iloc[index]['right_neural_foraminal_narrowing']])
+        if type(self.df_labels.iloc[index]['left_subarticular_stenosis']) == float:
+            label3 = -100
+        else:
+            label3 = torch.tensor(label2id[self.df_labels.iloc[index]['left_subarticular_stenosis']])
+        if type(self.df_labels.iloc[index]['right_subarticular_stenosis']) == float:
+            label4 = -100
+        else:
+            label4 = torch.tensor(label2id[self.df_labels.iloc[index]['right_subarticular_stenosis']])
+        
+        labels = torch.tensor([label0, label1, label2, label3, label4], dtype=torch.int64)
+        return x, category_hot, labels
 
 
 def data_loader(train_data: Path, labels_path: Path) -> tuple[DataLoader, DataLoader]:
