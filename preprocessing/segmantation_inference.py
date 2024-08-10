@@ -4,7 +4,7 @@ from matplotlib.patches import Rectangle
 
 import torch
 
-from segmentation_models_pytorch import Unet
+# from segmentation_models_pytorch import Unet
 
 import numpy as np 
 import os
@@ -19,6 +19,11 @@ import pydicom
 
 import albumentations as A
 from albumentations.pytorch import ToTensorV2
+
+import onnx
+import onnxruntime as ort
+
+
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
@@ -57,12 +62,14 @@ class SegmentaionInference:
         ])
     
     def load_model(self):
-        self.model = Unet(
-        encoder_name="resnet34",  # Choose encoder (e.g. resnet18, efficientnet-b0)
-        classes=self.num_classes,  # Number of output classes
-        in_channels=3  # Number of input channels (e.g. 3 for RGB)
-        ).to(device)
-        self.model.load_state_dict(torch.load("weights\simple_unet.pth"))
+        # self.model = Unet(
+        # encoder_name="resnet34",  # Choose encoder (e.g. resnet18, efficientnet-b0)
+        # classes=self.num_classes,  # Number of output classes
+        # in_channels=3  # Number of input channels (e.g. 3 for RGB)
+        # ).to(device)
+        # self.model.load_state_dict(torch.load(self.model_path))
+        self.session = ort.InferenceSession(self.model_path,
+                            providers=["CUDAExecutionProvider"])
     
     def prepare_data(self, dcm_path):
         image = pydicom.dcmread(dcm_path).pixel_array
@@ -77,17 +84,21 @@ class SegmentaionInference:
         if self.transforms_valid is not None:
             transformed = self.transforms_valid(image=image)
             image = transformed["image"]
-        image = torch.as_tensor(image).float()
+        # image = torch.as_tensor(image).float()
+        image = image.cpu().numpy()
+        image = image.reshape(1, 3, 256, 256)
         return image
 
     def predict_mask(self, dcm_path):
-        self.model.eval()
+        # self.model.eval()
         image = self.prepare_data(dcm_path)
         with torch.no_grad():
-            image = image.to(device)
-            image = image.unsqueeze(0)
-            outputs = self.model(image)
-            pred = torch.argmax(outputs, dim=1)
+            # image = image.to(device)
+            # image = image.unsqueeze(0)
+            output_name = self.session.get_outputs()[0].name
+            outputs = self.session.run([output_name], {'input1': image})[0]
+            # outputs = self.model(image)
+            pred = torch.argmax(torch.tensor(outputs), dim=1)
         return pred.cpu()
     
 
