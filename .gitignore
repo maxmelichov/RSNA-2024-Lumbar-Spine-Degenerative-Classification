@@ -6,3 +6,7 @@
 /CADDM_master
 *.dcm
 *.pyc
+*.whl
+*.aaaa
+*.gz
+*.json
