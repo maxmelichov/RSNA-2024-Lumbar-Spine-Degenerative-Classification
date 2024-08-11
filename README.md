@@ -19,3 +19,5 @@ epoch 1:
 Validation Loss:  0.8530751908979108
 Last LR [0.00036]
 Train Loss: 0.8827
+epoch 3:
+on val loss=0.854

@@ -185,7 +185,7 @@ class HybridEmbed(nn.Module):
 class VisionTransformer(nn.Module):
     """ Vision Transformer with support for patch or hybrid CNN input stage
     """
-    def __init__(self, img_size=224, patch_size=16, in_chans=120, num_classes=1000, embed_dim=768, depth=12,
+    def __init__(self, img_size=224, patch_size=16, in_chans=30, num_classes=1000, embed_dim=768, depth=12,
                  num_heads=12, mlp_ratio=4., qkv_bias=False, qk_scale=None, drop_rate=0., attn_drop_rate=0.,
                  drop_path_rate=0., hybrid_backbone=None, norm_layer=nn.LayerNorm):
         super().__init__()
@@ -201,7 +201,7 @@ class VisionTransformer(nn.Module):
         num_patches = self.patch_embed.num_patches
         
         self.cls_token = nn.Parameter(torch.zeros(1, 1, embed_dim))
-        self.pos_embed = nn.Parameter(torch.zeros(1, 65, embed_dim))
+        self.pos_embed = nn.Parameter(torch.zeros(1, 1025, embed_dim))
         self.pos_drop = nn.Dropout(p=drop_rate)
 
         dpr = [x.item() for x in torch.linspace(0, drop_path_rate, depth)]  # stochastic depth decay rule
@@ -218,7 +218,7 @@ class VisionTransformer(nn.Module):
         #self.repr_act = nn.Tanh()
 
         # Classifier head
-        self.head = nn.Linear(embed_dim*2 + 5, num_classes) if num_classes > 0 else nn.Identity()
+        self.head = nn.Linear(embed_dim*2, num_classes) if num_classes > 0 else nn.Identity()
 
         trunc_normal_(self.pos_embed, std=.02)
         trunc_normal_(self.cls_token, std=.02)
@@ -283,7 +283,7 @@ class VisionTransformer(nn.Module):
         x_block = x_block[:, 1:].reshape((x_block.size(0), int(x_block.size(1)**0.5), int(x_block.size(1)**0.5), x_block.size(2)))
         return x, x_block, attn_block
 
-    def forward(self, x, category_hot, step=1, attn_blk=[8,9,10,11,12], feat_blk=6, k=12, thr=0.7, is_progressive=1):
+    def forward(self, x, step=1, attn_blk=[8,9,10,11,12], feat_blk=6, k=12, thr=0.7, is_progressive=1):
         x, feat_block, attn_block = self.forward_features(x,attn_blk, feat_blk)
 
         x_cls, x_patch = x[:, 0], x[:, 1:]
@@ -299,7 +299,6 @@ class VisionTransformer(nn.Module):
         else:
             localization_map = localization_map.reshape(B,1,PP).to(x_patch.device)/PP
         x = torch.cat([x_cls, torch.bmm(localization_map, x_patch).squeeze(1)], -1)
-        x = torch.cat([x, category_hot], -1)
         x = self.head(x)
         return x, feat_block, attn_block
 

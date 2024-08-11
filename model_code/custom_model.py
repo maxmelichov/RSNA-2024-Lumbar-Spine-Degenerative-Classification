@@ -2,221 +2,160 @@ import torch
 
 import torch.nn as nn
 from efficientnet_pytorch import EfficientNet
-from model_code.network.vit_16_base_feat_middle_gal_v2 import vit_base_patch16_384, vit_base_patch16_256
+from model_code.network.vit_16_base_feat_middle_gal_v2 import vit_small_patch16_224, vit_base_patch16_256, vit_base_patch16_384
 from torchvision.models import densenet121
 import timm
 
-class CustomModel(nn.Module):
-    def __init__(self, num_classes=5):
-        super(CustomModel, self).__init__()
-        self.EfficientNet_model_Sagittal_T1 = EfficientNet.from_pretrained('efficientnet-b5', in_channels= 15)
-        self.EfficientNet_model_Axial_T2 = EfficientNet.from_pretrained('efficientnet-b5', in_channels= 10)
-        self.EfficientNet_model_Sagittal_T2_STIR = EfficientNet.from_pretrained('efficientnet-b5' , in_channels= 15)
-        self.transformer = vit_base_patch16_256(pretrained=False, num_classes=num_classes)
-
-    def forward(self, Sagittal_T1, Axial_T2, Sagittal_T2_STIR, **kwargs):
-        '''
-        Sagittal1 - Sagittal1 side view that has a connetion with Axial view
-        Axial T2 - the view from the top
-        Sagittal T2 STIR - Axial view that has a connection with Sagittal1
-        '''
-        Sagittal_T1 = self.EfficientNet_model_Sagittal_T1.extract_endpoints(Sagittal_T1)
-        Sagittal_T1 = Sagittal_T1['reduction_2']
-        Axial_T2 = self.EfficientNet_model_Axial_T2.extract_endpoints(Axial_T2)
-        Axial_T2 = Axial_T2['reduction_2']
-        Sagittal_T2_STIR = self.EfficientNet_model_Sagittal_T2_STIR.extract_endpoints(Sagittal_T2_STIR)
-        Sagittal_T2_STIR = Sagittal_T2_STIR['reduction_2']
-        Concatinate = torch.cat((Sagittal_T1, Axial_T2, Sagittal_T2_STIR), 1)
-        x = self.transformer(Concatinate, **kwargs)
-        return x
-
-
-class CustomModel2(nn.Module):
-    def __init__(self, num_classes=5):
-        super(CustomModel2, self).__init__()
-        self.EfficientNet_model_Sagittal_T1 = EfficientNet.from_pretrained('efficientnet-b0', in_channels= 10)
-        self.EfficientNet_model_Axial_T2 = EfficientNet.from_pretrained('efficientnet-b0', in_channels= 10)
-        self.EfficientNet_model_Sagittal_T2_STIR = EfficientNet.from_pretrained('efficientnet-b0' , in_channels= 10)
-        self.densenet121 = timm.create_model(
-                                    "timm/davit_tiny.msft_in1k",
-                                    pretrained=True, 
+class CustomRain(nn.Module):
+    def __init__(self, num_classes=75, pretrained=True):
+        super(CustomRain, self).__init__()
+        self.cnv1 = nn.Conv2d(10, 30, kernel_size=3, stride=2, padding=1)
+        self.bn1 = nn.BatchNorm2d(30)
+        self.cnv2 = nn.Conv2d(10, 30, kernel_size=3, stride=2, padding=1)
+        self.bn2 = nn.BatchNorm2d(30)
+        self.cnv3 = nn.Conv2d(10, 30, kernel_size=3, stride=2, padding=1)
+        self.bn3 = nn.BatchNorm2d(30)
+        self.cnv4 = nn.Conv2d(10, 30, kernel_size=3, stride=2, padding=1)
+        self.bn4 = nn.BatchNorm2d(30)
+        self.cnv5 = nn.Conv2d(10, 30, kernel_size=3, stride=2, padding=1)
+        self.bn5 = nn.BatchNorm2d(30)
+        self.saggital_l1_l2_backbone = timm.create_model(
+                                    "timm/convnext_nano.in12k",
+                                    pretrained=pretrained, 
                                     features_only=False,
-                                    in_chans=72,
-                                    num_classes=59,
-                                    global_pool='avg'
+                                    in_chans=60,
+                                    num_classes=256,
                                     )
-        self.fc1 = nn.Linear(64, 32)  # First fully connected layer
-        self.relu = nn.SELU()              # Activation function
-        self.fc2 = nn.Linear(32, num_classes)  # Second fully connected layer
+        self.saggital_l2_l3_backbone = timm.create_model(
+                                    "timm/convnext_nano.in12k",
+                                    pretrained=pretrained, 
+                                    features_only=False,
+                                    in_chans=60,
+                                    num_classes=256,
+                                    )
+        self.saggital_l3_l4_backbone = timm.create_model(
+                                    "timm/convnext_nano.in12k",
+                                    pretrained=pretrained, 
+                                    features_only=False,
+                                    in_chans=60,
+                                    num_classes=256,
+                                    )
+        self.saggital_l4_l5_backbone = timm.create_model(
+                                    "timm/convnext_nano.in12k",
+                                    pretrained=pretrained, 
+                                    features_only=False,
+                                    in_chans=60,
+                                    num_classes=256,
+                                    )
+        self.saggital_l5_s1_backbone = timm.create_model(
+                                    "timm/convnext_nano.in12k",
+                                    pretrained=pretrained, 
+                                    features_only=False,
+                                    in_chans=60,
+                                    num_classes=256,
+                                    )
+        
+        
+        hdim1 = self.saggital_l1_l2_backbone.head.fc.in_features * 5
+        self.saggital_l1_l2_backbone.head.fc = nn.Identity()
+        self.saggital_l2_l3_backbone.head.fc = nn.Identity()
+        self.saggital_l3_l4_backbone.head.fc = nn.Identity()
+        self.saggital_l4_l5_backbone.head.fc = nn.Identity()
+        self.saggital_l5_s1_backbone.head.fc = nn.Identity()
 
-    def forward(self, Sagittal_T1, Axial_T2, Sagittal_T2_STIR, category_hot):
-        '''
-        Sagittal1 - Sagittal1 side view that has a connetion with Axial view
-        Axial T2 - the view from the top
-        Sagittal T2 STIR - Axial view that has a connection with Sagittal1
-        '''
-        Sagittal_T1 = self.EfficientNet_model_Sagittal_T1.extract_endpoints(Sagittal_T1)
-        Sagittal_T1 = Sagittal_T1['reduction_2']
-        Axial_T2 = self.EfficientNet_model_Axial_T2.extract_endpoints(Axial_T2)
-        Axial_T2 = Axial_T2['reduction_2']
-        Sagittal_T2_STIR = self.EfficientNet_model_Sagittal_T2_STIR.extract_endpoints(Sagittal_T2_STIR)
-        Sagittal_T2_STIR = Sagittal_T2_STIR['reduction_2']
-        Concatinate = torch.cat((Sagittal_T1, Axial_T2, Sagittal_T2_STIR), 1)
-        x = self.densenet121(Concatinate)
-        # print(x.shape, category_hot.shape)
-        x = torch.cat((x, category_hot), 1)
-        x = self.fc1(x)
-        x = self.relu(x)
-        x = self.fc2(x)
+        self.lstm = nn.LSTM(hdim1, 256, num_layers=2, dropout=0., bidirectional=True, batch_first=True)
+        self.head1 = nn.Sequential(
+            nn.Linear(2560, 512),
+            nn.BatchNorm1d(512),
+            nn.Dropout(0.3),
+            nn.LeakyReLU(0.1),
+            nn.Linear(512, num_classes),
+        )
+        self.head2 = nn.Sequential(
+            nn.Linear(512, 256),
+            nn.BatchNorm1d(256),
+            nn.Dropout(0.3),
+            nn.LeakyReLU(0.1),
+            nn.Linear(256, 15),
+        )
+        self.head3 = nn.Sequential(
+            nn.Linear(512, 256),
+            nn.BatchNorm1d(256),
+            nn.Dropout(0.3),
+            nn.LeakyReLU(0.1),
+            nn.Linear(256, 15),
+        )
+
+        self.head4 = nn.Sequential(
+            nn.Linear(512, 256),
+            nn.BatchNorm1d(256),
+            nn.Dropout(0.3),
+            nn.LeakyReLU(0.1),
+            nn.Linear(256, 15),
+        )
+
+        self.head5 = nn.Sequential(
+            nn.Linear(512, 256),
+            nn.BatchNorm1d(256),
+            nn.Dropout(0.3),
+            nn.LeakyReLU(0.1),
+            nn.Linear(256, 15),
+        )
+
+    def forward(self, sagittal_l1_l2, sagittal_l2_l3, sagittal_l3_l4, sagittal_l4_l5,
+                 sagittal_l5_s1, axial_l1_l2, axial_l2_l3, axial_l3_l4, axial_l4_l5, axial_l5_s1):
+        axial_l1_l2 = self.cnv1(axial_l1_l2)
+        axial_l1_l2 = self.bn1(axial_l1_l2)
+        axial_l2_l3 = self.cnv2(axial_l2_l3)
+        axial_l2_l3 = self.bn2(axial_l2_l3)
+        axial_l3_l4 = self.cnv3(axial_l3_l4)
+        axial_l3_l4 = self.bn3(axial_l3_l4)
+        axial_l4_l5 = self.cnv4(axial_l4_l5)
+        axial_l4_l5 = self.bn4(axial_l4_l5)
+        axial_l5_s1 = self.cnv5(axial_l5_s1)
+        axial_l5_s1 = self.bn5(axial_l5_s1)
+        x1 = torch.cat([sagittal_l1_l2, axial_l1_l2], dim=1)
+        x2 = torch.cat([sagittal_l2_l3, axial_l2_l3], dim=1)
+        x3 = torch.cat([sagittal_l3_l4, axial_l3_l4], dim=1)
+        x4 = torch.cat([sagittal_l4_l5, axial_l4_l5], dim=1)
+        x5 = torch.cat([sagittal_l5_s1, axial_l5_s1], dim=1)
+        x1 = x1.view(x1.size(0), x1.size(1), -1)
+        x2 = x2.view(x2.size(0), x2.size(1), -1)
+        x3 = x3.view(x3.size(0), x3.size(1), -1)
+        x4 = x4.view(x4.size(0), x4.size(1), -1)
+        x5 = x5.view(x5.size(0), x5.size(1), -1)
+        x = torch.cat([x1, x2, x3, x4, x5], dim=1)
+        x, _ = self.lstm(x)
+        x = x.contiguous().view(x.size(0), 512*5)
+        x1 = torch.cat([x, x1], dim=1)
+        x2 = torch.cat([x, x2], dim=1)
+        x3 = torch.cat([x, x3], dim=1)
+        x4 = torch.cat([x, x4], dim=1)
+        x5 = torch.cat([x, x5], dim=1)
+
+        x1 = self.head1(x1)
+        x2 = self.head2(x2)
+        x3 = self.head3(x3)
+        x4 = self.head4(x4)
+        x5 = self.head5(x5)
+        x = torch.cat([x1, x2, x3, x4, x5], dim=1)
+        return x
+        x1, _ = self.lstm(x1)
+        x2, _ = self.lstm2(x2)
+        x3, _ = self.lstm3(x3)
+        x4, _ = self.lstm4(x4)
+        x5, _ = self.lstm5(x5)
+        x1 = x1.contiguous().view(x1.size(0), 512)
+        x2 = x2.contiguous().view(x2.size(0), 512)
+        x3 = x3.contiguous().view(x3.size(0), 512)
+        x4 = x4.contiguous().view(x4.size(0), 512)
+        x5 = x5.contiguous().view(x5.size(0), 512)
+        x1 = self.head(x1)
+        x2 = self.head2(x2)
+        x3 = self.head3(x3)
+        x4 = self.head4(x4)
+        x5 = self.head5(x5)
+        x = torch.cat([x1, x2, x3, x4, x5], dim=1)
         return x
 
-
-class CustomModel3(nn.Module):
-    def __init__(self, num_classes=5):
-        super(CustomModel3, self).__init__()
-        self.EfficientNet_model_Sagittal_T1 = EfficientNet.from_pretrained('efficientnet-b3', in_channels= 15)
-        self.EfficientNet_model_Axial_T2 = EfficientNet.from_pretrained('efficientnet-b3', in_channels= 10)
-        self.EfficientNet_model_Sagittal_T2_STIR = EfficientNet.from_pretrained('efficientnet-b3' , in_channels= 15)
-        self.EfficientNet = EfficientNet.from_pretrained("efficientnet-b7", in_channels= 96)
-        self.number_classes = num_classes
-        self.liner = nn.Linear(1000 + 5, self.number_classes)
-
-    def forward(self, Sagittal_T1, Axial_T2, Sagittal_T2_STIR, category_hot):
-        '''
-        Sagittal1 - Sagittal1 side view that has a connetion with Axial view
-        Axial T2 - the view from the top
-        Sagittal T2 STIR - Axial view that has a connection with Sagittal1
-        '''
-        Sagittal_T1 = self.EfficientNet_model_Sagittal_T1.extract_endpoints(Sagittal_T1)
-        Sagittal_T1 = Sagittal_T1['reduction_2']
-        Axial_T2 = self.EfficientNet_model_Axial_T2.extract_endpoints(Axial_T2)
-        Axial_T2 = Axial_T2['reduction_2']
-        Sagittal_T2_STIR = self.EfficientNet_model_Sagittal_T2_STIR.extract_endpoints(Sagittal_T2_STIR)
-        Sagittal_T2_STIR = Sagittal_T2_STIR['reduction_2']
-        Concatinate = torch.cat((Sagittal_T1, Axial_T2, Sagittal_T2_STIR), 1)
-        x = self.EfficientNet(Concatinate)
-        x = torch.cat((x, category_hot), 1)
-        x = self.liner(x)
-        return x
     
-
-class CustomModel4(nn.Module):
-    def __init__(self, num_classes=5):
-        super(CustomModel4, self).__init__()
-        self.davit_model_Sagittal_T1 = timm.create_model(
-                                    "timm/davit_small.msft_in1k",
-                                    pretrained=True, 
-                                    features_only=False,
-                                    in_chans=3)
-        self.davit_model_Axial_T2 = timm.create_model(
-                                    "timm/davit_small.msft_in1k",
-                                    pretrained=True, 
-                                    features_only=False,
-                                    in_chans=10)
-        self.davit_model_Sagittal_T2_STIR = timm.create_model(
-                                    "timm/davit_small.msft_in1k",
-                                    pretrained=True, 
-                                    features_only=False,
-                                    in_chans=3)
-        self.densenet121 = timm.create_model(
-                                    "densenet121",
-                                    pretrained=True, 
-                                    features_only=False,
-                                    in_chans=120,
-                                    num_classes=251,
-                                    global_pool='avg'
-                                    )
-        self.fc1 = nn.Linear(251 + 5, 128)  # First fully connected layer
-        self.relu = nn.SELU()               # Activation function
-        self.fc2 = nn.Linear(128, num_classes)  # Second fully connected layer
-
-    def forward(self, Sagittal_T1, Axial_T2, Sagittal_T2_STIR, category_hot):
-        '''
-        Sagittal1 - Sagittal1 side view that has a connetion with Axial view
-        Axial T2 - the view from the top
-        Sagittal T2 STIR - Axial view that has a connection with Sagittal1
-        '''
-        Sagittal_T1 = self.davit_model_Sagittal_T1.extract_endpoints(Sagittal_T1)
-        Sagittal_T1 = Sagittal_T1['reduction_2']
-        Axial_T2 = self.davit_model_Axial_T2.extract_endpoints(Axial_T2)
-        Axial_T2 = Axial_T2['reduction_2']
-        Sagittal_T2_STIR = self.davit_model_Sagittal_T2_STIR.extract_endpoints(Sagittal_T2_STIR)
-        Sagittal_T2_STIR = Sagittal_T2_STIR['reduction_2']
-        Concatinate = torch.cat((Sagittal_T1, Axial_T2, Sagittal_T2_STIR), 1)
-        x = self.densenet121(Concatinate)
-        x = torch.cat((x, category_hot), 1)
-        x = self.fc1(x)
-        x = self.relu(x)
-        x = self.fc2(x)
-        return x
-    
-class CustomModel5(nn.Module):
-    def __init__(self, num_classes=5):
-        super(CustomModel5, self).__init__()
-        self.EfficientNet_model_Sagittal_T1 = EfficientNet.from_pretrained('efficientnet-b3', in_channels= 3)
-        self.EfficientNet_model_Axial_T2 = EfficientNet.from_pretrained('efficientnet-b3', in_channels= 10)
-        self.EfficientNet_model_Sagittal_T2_STIR = EfficientNet.from_pretrained('efficientnet-b3' , in_channels= 3)
-        self.densenet121 = timm.create_model(
-                                    "timm/davit_small.msft_in1k",
-                                    pretrained=True, 
-                                    features_only=False,
-                                    in_chans=96,
-                                    num_classes=251,
-                                    )
-        self.fc1 = nn.Linear(251 + 5, 128)  # First fully connected layer
-        self.relu = nn.SELU()               # Activation function
-        self.fc2 = nn.Linear(128, num_classes)  # Second fully connected layer
-
-    def forward(self, Sagittal_T1, Axial_T2, Sagittal_T2_STIR, category_hot):
-        '''
-        Sagittal1 - Sagittal1 side view that has a connetion with Axial view
-        Axial T2 - the view from the top
-        Sagittal T2 STIR - Axial view that has a connection with Sagittal1
-        '''
-        Sagittal_T1 = self.EfficientNet_model_Sagittal_T1.extract_endpoints(Sagittal_T1)
-        Sagittal_T1 = Sagittal_T1['reduction_2']
-        Axial_T2 = self.EfficientNet_model_Axial_T2.extract_endpoints(Axial_T2)
-        Axial_T2 = Axial_T2['reduction_2']
-        Sagittal_T2_STIR = self.EfficientNet_model_Sagittal_T2_STIR.extract_endpoints(Sagittal_T2_STIR)
-        Sagittal_T2_STIR = Sagittal_T2_STIR['reduction_2']
-        Concatinate = torch.cat((Sagittal_T1, Axial_T2, Sagittal_T2_STIR), 1)
-        x = self.densenet121(Concatinate)
-        x = torch.cat((x, category_hot), 1)
-        x = self.fc1(x)
-        x = self.relu(x)
-        x = self.fc2(x)
-        return x
-    
-
-class CustomModel6(nn.Module):
-    def __init__(self, num_classes=5):
-        super(CustomModel6, self).__init__()
-        self.densenet121 = timm.create_model(
-                                    "timm/davit_small.msft_in1k",
-                                    pretrained=True, 
-                                    features_only=False,
-                                    in_chans=30,
-                                    num_classes=251,
-                                    )
-        self.fc1 = nn.Linear(251 + 5, 128)  # First fully connected layer
-        self.relu = nn.SELU()               # Activation function
-        self.fc2 = nn.Linear(128, num_classes)  # Second fully connected layer
-
-    def forward(self, x, category_hot):
-        '''
-        Sagittal1 - Sagittal1 side view that has a connetion with Axial view
-        Axial T2 - the view from the top
-        Sagittal T2 STIR - Axial view that has a connection with Sagittal1
-        '''
-        x = self.densenet121(x)
-        x = torch.cat((x, category_hot), 1)
-        x = self.fc1(x)
-        x = self.relu(x)
-        x = self.fc2(x)
-        return x
-# # Create an instance of your model
-
-# model = CustomModel()
-
-# # Print the model architecture
-# print(model)

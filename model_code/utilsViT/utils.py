@@ -76,81 +76,120 @@ def mahalanobis_distance(
 import pdb
 
 class Attention_Correlation_weight_reshape_loss(nn.Module):
-    def __init__(self, c_out, c_in, c_cross):
+    def __init__(self, c_out, c_in, c_cross) -> None:
         super(Attention_Correlation_weight_reshape_loss, self).__init__()
         self.c_out = c_out
         self.c_in = c_in
         self.c_cross = c_cross
         self.device = c_out.device
+    def forward(self, correlation_map_normal, correlation_map_mild, correlation_map_severe, mild_weight, severe_weight):
+        if correlation_map_normal.shape[0] == 0:
+            loss_normal = 0
+        else:
+            B, PP, PP = correlation_map_normal.shape
+            C_matrix = torch.eye(PP).to(self.device) * (1-self.c_out) + self.c_out*torch.ones(PP).to(self.device)
+            C_matrix = C_matrix.expand(B, -1, -1)
+            loss_normal = torch.sum(torch.abs(correlation_map_normal - C_matrix))/(B*(PP*PP-PP))
 
-    def forward(self, correlation_map_real, correlation_map_fake, correlation_map_altered, fake_weight, altered_weight):
-        loss_real, loss_fake, loss_altered = 0, 0, 0  # Initialize losses
+        if correlation_map_mild.shape[0] == 0:
+            loss_mild = 0
+        else:
+            B, PP, PP = correlation_map_mild.shape
+            C_matrix_mild_all = []
+            for b in range(B):
+                mild_index = torch.where(mild_weight[b].reshape(-1) < severe_weight[b].reshape(-1))[0]
+                normal_index = torch.where(mild_weight[b].reshape(-1)<=0)[0]
+                C_matrix_mild = torch.zeros((PP, PP)).to(self.device) + self.c_cross
+                for i in mild_index:
+                    C_matrix_mild[i, mild_index] = self.c_in
+                for j in normal_index:
+                    C_matrix_mild[j, normal_index] = self.c_out
+                C_matrix_mild_all.append(C_matrix_mild)
+            C_matrix_mild_all = torch.stack(C_matrix_mild_all).to(self.device)
+            # C_matrix_fake = C_matrix_fake.expand(B, -1, -1).cuda()
+            loss_mild = torch.sum(torch.abs(correlation_map_mild - C_matrix_mild_all))/(B*(PP*PP-PP))
 
-        # Loss computation for 'real'
-        if correlation_map_real.shape[0] != 0:
-            B, PP, PP = correlation_map_real.shape
-            C_matrix_real = torch.eye(PP).to(self.device) * (1-self.c_out) + self.c_out * torch.ones(PP).to(self.device)
-            C_matrix_real = C_matrix_real.expand(B, -1, -1)
-            loss_real = torch.sum(torch.abs(correlation_map_real - C_matrix_real)) / (B * (PP * PP - PP))
+        if correlation_map_severe.shape[0] == 0:
+            loss_severe = 0
+        else:
+            B, PP, PP = correlation_map_severe.shape
+            C_matrix_severe_all = []
+            for b in range(B):
+                severe_index = torch.where(severe_weight[b].reshape(-1) > mild_weight[b].reshape(-1))[0]
+                normal_index = torch.where(severe_weight[b].reshape(-1)<=0)[0]
+                C_matrix_severe = torch.zeros((PP, PP)).to(self.device) + self.c_cross
+                for i in severe_index:
+                    C_matrix_severe[i, severe_index] = self.c_in
+                for j in normal_index:
+                    C_matrix_severe[j, normal_index] = self.c_out
+                C_matrix_severe_all.append(C_matrix_severe)
+            C_matrix_severe_all = torch.stack(C_matrix_severe_all).to(self.device)
+            loss_severe = torch.sum(torch.abs(correlation_map_severe - C_matrix_severe_all))/(B*(PP*PP-PP))
 
-        # Loss computation for 'fake'
-        if correlation_map_fake.shape[0] != 0:
-            loss_fake = self.calculate_loss_per_class(correlation_map_fake, fake_weight, self.c_in, self.c_out, self.c_cross)
-
-        # New loss computation for 'altered'
-        if correlation_map_altered.shape[0] != 0:
-            loss_altered = self.calculate_loss_per_class(correlation_map_altered, altered_weight, self.c_in, self.c_out, self.c_cross)
-
-        loss = loss_fake + loss_real + loss_altered  # Total loss
+        loss = loss_normal + loss_mild + loss_severe
         return loss
 
-    def calculate_loss_per_class(self, correlation_map, weight, c_in, c_out, c_cross):
-        B, PP, PP = correlation_map.shape
-        C_matrix_all = []
-        for b in range(B):
-            index_positive = torch.where(weight[b].reshape(-1) > 0)[0]
-            index_negative = torch.where(weight[b].reshape(-1) <= 0)[0]
-            C_matrix = torch.zeros((PP, PP)).to(self.device) + c_cross
-            C_matrix[index_positive, index_positive] = c_in
-            C_matrix[index_negative, index_negative] = c_out
-            C_matrix_all.append(C_matrix)
-        C_matrix_all = torch.stack(C_matrix_all).to(self.device)
-        return torch.sum(torch.abs(correlation_map - C_matrix_all)) / (B * (PP * PP - PP))
-    # def __init__(self, c_out, c_in, c_cross) -> None:
-    #     super(Attention_Correlation_weight_reshape_loss, self).__init__()
-    #     self.c_out = c_out
-    #     self.c_in = c_in
-    #     self.c_cross = c_cross
-    #     self.device = c_out.device
-    # def forward(self, correlation_map_real, correlation_map_fake, fake_weight):
-    #     if correlation_map_real.shape[0] == 0:
-    #         loss_real = 0
-    #     else:
-    #         B, PP, PP = correlation_map_real.shape
-    #         C_matrix = torch.eye(PP).to(self.device) * (1-self.c_out) + self.c_out*torch.ones(PP).to(self.device)
-    #         C_matrix = C_matrix.expand(B, -1, -1)
-    #         loss_real = torch.sum(torch.abs(correlation_map_real - C_matrix))/(B*(PP*PP-PP))
+# class Attention_Correlation_weight_reshape_loss(nn.Module):
+#     def __init__(self, c_out, c_in, c_cross):
+#         super(Attention_Correlation_weight_reshape_loss, self).__init__()
+#         self.c_out = c_out
+#         self.c_in = c_in
+#         self.c_cross = c_cross
+#         self.device = c_out.device
 
-    #     if correlation_map_fake.shape[0] == 0:
-    #         loss_fake = 0
-    #     else:
-    #         B, PP, PP = correlation_map_fake.shape
-    #         C_matrix_fake_all = []
-    #         for b in range(B):
-    #             fake_index = torch.where(fake_weight[b].reshape(-1)>0)[0]
-    #             real_index = torch.where(fake_weight[b].reshape(-1)<=0)[0]
-    #             C_matrix_fake = torch.zeros((PP, PP)).to(self.device) + self.c_cross
-    #             for i in fake_index:
-    #                 C_matrix_fake[i, fake_index] = self.c_in
-    #             for j in real_index:
-    #                 C_matrix_fake[j, real_index] = self.c_out
-    #             C_matrix_fake_all.append(C_matrix_fake)
-    #         C_matrix_fake_all = torch.stack(C_matrix_fake_all).to(self.device)
-    #         # C_matrix_fake = C_matrix_fake.expand(B, -1, -1).cuda()
-    #         loss_fake = torch.sum(torch.abs(correlation_map_fake - C_matrix_fake_all))/(B*(PP*PP-PP))
+#     def forward(self, correlation_map_normal, correlation_map_mild, correlation_map_severe, mild_weight, severe_weight):
 
-    #     loss = loss_fake + loss_real
-    #     return loss
+#         # Compute loss for normal correlation map
+#         if correlation_map_normal.shape[0] == 0:
+#             loss_normal = 0
+#         else:
+#             B, PP, PP = correlation_map_normal.shape
+#             C_matrix_normal = torch.eye(PP).to(self.device) * (1 - self.c_out) + self.c_out * torch.ones(PP, PP).to(self.device)
+#             loss_normal = torch.sum(torch.abs(correlation_map_normal - C_matrix_normal)) / (B * (PP * PP - PP))
+
+#         # Compute loss for mild correlation map
+#         if correlation_map_mild.shape[0] == 0:
+#             loss_mild = 0
+#         else:
+#             B, PP, PP = correlation_map_mild.shape
+#             C_matrix_mild = []
+#             for b in range(B):
+#                 mild_index = torch.where(mild_weight[b].reshape(-1) < severe_weight[b].reshape(-1))[0]
+#                 normal_index = torch.where(mild_weight[b].reshape(-1) <= 0)[0]
+
+#                 C_matrix_m = torch.zeros((PP, PP)).to(self.device) + self.c_cross
+#                 for i in mild_index:
+#                     C_matrix_m[i, mild_index] = self.c_in
+#                 for j in normal_index:
+#                     C_matrix_m[j, normal_index] = self.c_out
+
+#                 C_matrix_mild.append(C_matrix_m)
+#             C_matrix_mild = torch.stack(C_matrix_mild).to(self.device)
+#             loss_mild = torch.sum(torch.abs(correlation_map_mild - C_matrix_mild)) / (B * (PP * PP - PP))
+
+#         # Compute loss for severe correlation map
+#         if correlation_map_severe.shape[0] == 0:
+#             loss_severe = 0
+#         else:
+#             B, PP, PP = correlation_map_severe.shape
+#             C_matrix_severe = []
+#             for b in range(B):
+#                 severe_index = torch.where(severe_weight[b].reshape(-1) > mild_weight[b].reshape(-1))[0]
+#                 normal_index = torch.where(severe_weight[b].reshape(-1) <= 0)[0]
+
+#                 C_matrix_s = torch.zeros((PP, PP)).to(self.device) + self.c_cross
+#                 for i in severe_index:
+#                     C_matrix_s[i, severe_index] = self.c_in
+#                 for j in normal_index:
+#                     C_matrix_s[j, normal_index] = self.c_out
+
+#                 C_matrix_severe.append(C_matrix_s)
+#             C_matrix_severe = torch.stack(C_matrix_severe).to(self.device)
+#             loss_severe = torch.sum(torch.abs(correlation_map_severe - C_matrix_severe)) / (B * (PP * PP - PP))
+
+#         # Combine losses
+#         loss = loss_normal + loss_mild + loss_severe
+#         return loss
 
 
 def estimate_MVG(feat_tensorlist_real, feat_tensorlist_fake):

@@ -10,13 +10,13 @@ from PIL import Image
 import pandas as pd
 from typing import Union
 
-image_dir = "train_images/"
-segmentation = SegmentaionInference(model_path=r"weights\simple_unet.pth")
+
+
 # Cross-Reference Images in Different MRI Planes
 class CrossReference:
-    def __init__(self) -> None:
-        pass
-
+    def __init__(self, image_dir :str = r"train_images\\", segmentation_model_path: str = r"weights\simple_unet.onnx"):
+        self.image_dir = image_dir
+        self.segmentation = SegmentaionInference(segmentation_model_path)
     @staticmethod
     def _convert_to_8bit(x: np.ndarray) -> np.ndarray:
         lower, upper = np.percentile(x, (1, 99))
@@ -128,8 +128,8 @@ class CrossReference:
             pydicom.filewriter.dcmwrite(os.path.join(save_path, file_name), original_dicom)
         
 
-    @staticmethod
-    def _infer_axis_from_study(sag_t: dict, axs_t2: list[dict]) -> None:
+    
+    def _infer_axis_from_study(self, sag_t: dict, axs_t2: list[dict]) -> None:
         top_left_hand_corner_sag_t2 = sag_t["positions"][len(sag_t["array"]) // 2]
         sag_y_axis_to_pixel_space = [top_left_hand_corner_sag_t2[2]]
         while len(sag_y_axis_to_pixel_space) < sag_t["array"].shape[1]: 
@@ -144,7 +144,7 @@ class CrossReference:
                 sag_y_coord_to_axial_slice[sag_y_coord] = ax_t2_slice
 
             
-            bboxes = segmentation.inference(sag_t["sorted_files"][len(sag_t["sorted_files"]) // 2])
+            bboxes = self.segmentation.inference(sag_t["sorted_files"][len(sag_t["sorted_files"]) // 2])
             for i, y in enumerate([*sag_y_coord_to_axial_slice]):
                 classes = CrossReference._find_classes(y, bboxes)
                 if classes != -1:
@@ -152,8 +152,8 @@ class CrossReference:
                         save_path, file_name = CrossReference._get_save_path_for_Axial(ax_t2["sorted_files"][i], cls)
                         os.makedirs(save_path, exist_ok=True)
                         shutil.copyfile(ax_t2["sorted_files"][i], os.path.join(save_path, file_name))
-    @staticmethod
-    def _infer_axis_from_study_for_test(sag_t: dict, axs_t2: list[dict]) -> pd.DataFrame:
+    
+    def _infer_axis_from_study_for_test(self, sag_t: dict, axs_t2: list[dict]) -> pd.DataFrame:
         top_left_hand_corner_sag_t2 = sag_t["positions"][len(sag_t["array"]) // 2]
         sag_y_axis_to_pixel_space = [top_left_hand_corner_sag_t2[2]]
         while len(sag_y_axis_to_pixel_space) < sag_t["array"].shape[1]: 
@@ -168,7 +168,7 @@ class CrossReference:
                 sag_y_coord_to_axial_slice[sag_y_coord] = ax_t2_slice
 
             
-            bboxes = segmentation.inference(sag_t["sorted_files"][len(sag_t["sorted_files"]) // 2])
+            bboxes = self.segmentation.inference(sag_t["sorted_files"][len(sag_t["sorted_files"]) // 2])
 
             classes_df = pd.DataFrame(columns=["path", "class_id"])
             for i, y in enumerate([*sag_y_coord_to_axial_slice]):
@@ -181,32 +181,28 @@ class CrossReference:
         return classes_df
 
 
-    @staticmethod
-    def get_cross_reference_for_Axial(study: pd.DataFrame, mode = "train") -> Union[None, pd.DataFrame]:
-        if mode == "train":
-            image_dir = "train_images\\"
-        else:
-            image_dir = "test_images\\"
+    
+    def get_cross_reference_for_Axial(self, study: pd.DataFrame, mode = "train") -> Union[None, pd.DataFrame]:
         sag_t1, sag_t2, ax_t2 = None, None, []
         for row in study.itertuples():
             if row.series_description == "Sagittal T2/STIR":
-                sag_t2 = CrossReference._load_dicom_stack(os.path.join(image_dir, str(row.study_id), str(row.series_id)), plane="sagittal")
+                sag_t2 = CrossReference._load_dicom_stack(os.path.join(self.image_dir, str(row.study_id), str(row.series_id)), plane="sagittal")
             elif row.series_description == "Sagittal T1":
-                sag_t1 = CrossReference._load_dicom_stack(os.path.join(image_dir, str(row.study_id), str(row.series_id)), plane="sagittal")
+                sag_t1 = CrossReference._load_dicom_stack(os.path.join(self.image_dir, str(row.study_id), str(row.series_id)), plane="sagittal")
             elif row.series_description == "Axial T2":
-                ax_t2.append(CrossReference._load_dicom_stack(os.path.join(image_dir, str(row.study_id), str(row.series_id)), plane="axial", reverse_sort=True))
+                ax_t2.append(CrossReference._load_dicom_stack(os.path.join(self.image_dir, str(row.study_id), str(row.series_id)), plane="axial", reverse_sort=True))
         if mode == "train":
             if sag_t2 and ax_t2:
-                CrossReference._infer_axis_from_study(sag_t2, ax_t2)
+                self._infer_axis_from_study(sag_t2, ax_t2)
             elif sag_t1 and ax_t2:
-                CrossReference._infer_axis_from_study(sag_t1, ax_t2)
+                self._infer_axis_from_study(sag_t1, ax_t2)
             else:
                 print("Could not find Sagittal T2/STIR or Sagittal T1 and Axial T2 for this study. Study ID:", study.study_id)
         else:
             if sag_t2 and ax_t2:
-                return CrossReference._infer_axis_from_study_for_test(sag_t2, ax_t2)
+                return self._infer_axis_from_study_for_test(sag_t2, ax_t2)
             elif sag_t1 and ax_t2:
-                return CrossReference._infer_axis_from_study_for_test(sag_t1, ax_t2)
+                return self._infer_axis_from_study_for_test(sag_t1, ax_t2)
             else:
                 print("Could not find Sagittal T2/STIR or Sagittal T1 and Axial T2 for this study. Study ID:", study.study_id)
 
