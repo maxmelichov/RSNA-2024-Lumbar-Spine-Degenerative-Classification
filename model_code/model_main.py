@@ -52,9 +52,15 @@ class Abstract(ABC):
         scheduler_lr (float, optional): The learning rate that the scheduler will reduce to. Defaults to 1e-6.
     """
 
-    def __init__(self, model: nn.modules, epochs:int = 10, batch_size:int = 128, save_wieghts:bool = False, load_weights:str = None, opt: Any = None, lr: float = 1e-4, scheduler_lr: float = 1e-6):
+    def __init__(self, model_l1_l2: nn.modules, model_l2_l3: nn.modules, model_l3_l4: nn.modules, model_l4_l5: nn.modules,
+                model_l5_s1: nn.modules, epochs:int = 10, batch_size:int = 128, save_wieghts:bool = False,
+                load_weights:str = None, opt: Any = None, lr: float = 1e-4, scheduler_lr: float = 1e-6):
         super().__init__()
-        self.model = model
+        self.model_l1_l2 = model_l1_l2
+        self.model_l2_l3 = model_l2_l3
+        self.model_l3_l4 = model_l3_l4
+        self.model_l4_l5 = model_l4_l5
+        self.model_l5_s1 = model_l5_s1
         self.epochs = epochs
         self.batch_size = batch_size
         self.save_wieghts = save_wieghts
@@ -437,7 +443,11 @@ class Abstract(ABC):
         Returns:
             tuple[float, float]: The mean loss and validation accuracy.
         """
-        self.model.eval()
+        self.model_l1_l2.eval()
+        self.model_l2_l3.eval()
+        self.model_l3_l4.eval()
+        self.model_l4_l5.eval()
+        self.model_l5_s1.eval()
         with torch.no_grad():
             losses = AverageMeter() 
             progress_bar = tqdm(val_loader, desc='Validation', leave=False)
@@ -452,13 +462,22 @@ class Abstract(ABC):
                 axial_l3_l4 = axial_l3_l4.cuda()
                 axial_l4_l5 = axial_l4_l5.cuda()
                 axial_l5_s1 = axial_l5_s1.cuda()
-                labels = labels.cuda()
+                labels = labels.cuda().to(torch.long)
+                loss_dis = 0.0
                 with autocast:
-                    outputs = self.model(sagittal_l1_l2, sagittal_l2_l3, sagittal_l3_l4, sagittal_l4_l5,
-                                          sagittal_l5_s1, axial_l1_l2, axial_l2_l3, axial_l3_l4, axial_l4_l5, axial_l5_s1)
-                    outputs = outputs.reshape(-1, 3, 25)
+                    outputs_l1_l2 = self.model_l1_l2(sagittal_l1_l2)
+                    outputs_l2_l3 = self.model_l2_l3(sagittal_l2_l3)
+                    outputs_l3_l4 = self.model_l3_l4(sagittal_l3_l4)
+                    outputs_l4_l5 = self.model_l4_l5(sagittal_l4_l5)
+                    outputs_l5_s1 = self.model_l5_s1(sagittal_l5_s1)
+                    outputs = outputs_l1_l2 + outputs_l2_l3 + outputs_l3_l4 + outputs_l4_l5 + outputs_l5_s1
                     
-                    loss_dis = loss_fn(outputs, labels)
+                    
+                    # outputs = outputs.reshape(-1, 3, 25)
+                    for col in range(25):
+                        pred = outputs[:, col * 3:col * 3 + 3]
+                        gt = labels[:, col]
+                        loss_dis = loss_dis + loss_fn(pred, gt) / 25 
                 loss_total = loss_dis
                 losses.update(loss_total.item())
                 progress_bar.set_postfix({'loss':losses.avg})
@@ -469,15 +488,22 @@ class Abstract(ABC):
         """
         Train the model.
         """
-        if self.load_weights != None:
-            self.model = Abstract.load_model(self.model, self.load_weights)
+        optimizer_l1_l2 = torch.optim.AdamW(self.model_l1_l2.parameters(), lr=self.lr, weight_decay=1e-4)
+        optimizer_l2_l3 = torch.optim.AdamW(self.model_l2_l3.parameters(), lr=self.lr, weight_decay=1e-4)
+        optimizer_l3_l4 = torch.optim.AdamW(self.model_l3_l4.parameters(), lr=self.lr, weight_decay=1e-4)
+        optimizer_l4_l5 = torch.optim.AdamW(self.model_l4_l5.parameters(), lr=self.lr, weight_decay=1e-4)
+        optimizer_l5_s1 = torch.optim.AdamW(self.model_l5_s1.parameters(), lr=self.lr, weight_decay=1e-4)
 
-        optimizer = torch.optim.AdamW(self.model.parameters(), lr=self.lr, weight_decay=1e-4)
-        print("Number of trainable parameters:", Abstract.count_parameters(self.model))
-        scheduler = Abstract.get_scheduler_reduceOnPlateau(optimizer, mode='min', factor=0.1, patience=2, threshold=0.0001)
-        weights = torch.tensor([1.0, 2.0, 4.0])
-        # criterion = nn.CrossEntropyLoss(weight=weights.to(device))
-        criterion = SevereLoss(temperature=0)
+        print("Number of trainable parameters:", Abstract.count_parameters(self.model_l1_l2)*5)
+        scheduler_l1_l2 = Abstract.get_scheduler_reduceOnPlateau(optimizer_l1_l2, mode='min', factor=0.1, patience=2, threshold=0.0001)
+        scheduler_l2_l3 = Abstract.get_scheduler_reduceOnPlateau(optimizer_l2_l3, mode='min', factor=0.1, patience=2, threshold=0.0001)
+        scheduler_l3_l4 = Abstract.get_scheduler_reduceOnPlateau(optimizer_l3_l4, mode='min', factor=0.1, patience=2, threshold=0.0001)
+        scheduler_l4_l5 = Abstract.get_scheduler_reduceOnPlateau(optimizer_l4_l5, mode='min', factor=0.1, patience=2, threshold=0.0001)
+        scheduler_l5_s1 = Abstract.get_scheduler_reduceOnPlateau(optimizer_l5_s1, mode='min', factor=0.1, patience=2, threshold=0.0001)
+
+        weights = torch.tensor([1.0, 2.0, 4.0], dtype= torch.float32)
+        criterion = nn.CrossEntropyLoss(weight=weights.to(device))
+        # criterion = SevereLoss(temperature=0)
         # criterion = CustomLoss(weights.to(device))
         # criterion = FocalLossWithWeights()
         criterion = criterion.cuda()
@@ -515,7 +541,11 @@ class Abstract(ABC):
                 losses = AverageMeter() 
                 for (sagittal_l1_l2, sagittal_l2_l3, sagittal_l3_l4, sagittal_l4_l5, sagittal_l5_s1, axial_l1_l2, axial_l2_l3, axial_l3_l4, axial_l4_l5, axial_l5_s1, labels) in progress_bar:
                     # print("stack_l1_l2", stack_l1_l2.shape)
-                    self.model.train(True)
+                    self.model_l1_l2.train(True)
+                    self.model_l2_l3.train(True)
+                    self.model_l3_l4.train(True)
+                    self.model_l4_l5.train(True)
+                    self.model_l5_s1.train(True)
                     sagittal_l1_l2 = sagittal_l1_l2.cuda()
                     sagittal_l2_l3 = sagittal_l2_l3.cuda()
                     sagittal_l3_l4 = sagittal_l3_l4.cuda()
@@ -528,26 +558,94 @@ class Abstract(ABC):
                     axial_l5_s1 = axial_l5_s1.cuda()
 
 
-                    labels = labels.cuda()
-                    optimizer.zero_grad()
+                    labels = labels.cuda().to(torch.long)
+                    optimizer_l1_l2.zero_grad()
+                    optimizer_l2_l3.zero_grad()
+                    optimizer_l3_l4.zero_grad()
+                    optimizer_l4_l5.zero_grad()
+                    optimizer_l5_s1.zero_grad()
+                    loss_l1_l2 = 0.0
+                    loss_l2_l3 = 0.0
+                    loss_l3_l4 = 0.0
+                    loss_l4_l5 = 0.0
+                    loss_l5_s1 = 0.0
                     with autocast:
-                        outputs = self.model(sagittal_l1_l2, sagittal_l2_l3, sagittal_l3_l4, sagittal_l4_l5, sagittal_l5_s1, axial_l1_l2, axial_l2_l3, axial_l3_l4, axial_l4_l5, axial_l5_s1)
-                        outputs = outputs.reshape(-1, 3, 25)
-                        loss_dis = criterion(outputs, labels)
-                    loss_dis_total = loss_dis
+                        output_l1_l2 = self.model_l1_l2(sagittal_l1_l2, axial_l1_l2)
+                        output_l2_l3 = self.model_l2_l3(sagittal_l2_l3, axial_l2_l3)
+                        output_l3_l4 = self.model_l3_l4(sagittal_l3_l4, axial_l3_l4)
+                        output_l4_l5 = self.model_l4_l5(sagittal_l4_l5, axial_l4_l5)
+                        output_l5_s1 = self.model_l5_s1(sagittal_l5_s1, axial_l5_s1)
+                        # outputs = outputs.reshape(-1, 3, 25)
+                        col_i = 0
+                        for col in range(5):
+                            pred = output_l1_l2[:,col*3:col*3+3]
+                            gt = labels[:,col_i]
+                            col_i += 1
+                            loss_l1_l2 = loss_l1_l2 + criterion(pred, gt) / 5
+                        scaler.scale(loss_l1_l2).backward()
+                        scaler.unscale_(optimizer_l1_l2)
+                        torch.nn.utils.clip_grad_norm_(self.model_l1_l2.parameters(), 2.0)
+                        scaler.step(optimizer_l1_l2)
+                        scaler.update()
+
+                        for col in range(5):
+                            pred = output_l2_l3[:,col*3:col*3+3]
+                            gt = labels[:,col_i]
+                            col_i += 1
+                            loss_l2_l3 = loss_l2_l3 + criterion(pred, gt) / 5
+                        scaler.scale(loss_l2_l3).backward()
+                        scaler.unscale_(optimizer_l2_l3)
+                        torch.nn.utils.clip_grad_norm_(self.model_l2_l3.parameters(), 2.0)
+                        scaler.step(optimizer_l2_l3)
+                        scaler.update()
+
+                        for col in range(5):
+                            pred = output_l3_l4[:,col*3:col*3+3]
+                            gt = labels[:,col_i]
+                            col_i += 1
+                            loss_l3_l4 = loss_l3_l4 + criterion(pred, gt) / 5
+                        scaler.scale(loss_l3_l4).backward()
+                        scaler.unscale_(optimizer_l3_l4)
+                        torch.nn.utils.clip_grad_norm_(self.model_l3_l4.parameters(), 2.0)
+                        scaler.step(optimizer_l3_l4)
+                        scaler.update()
+
+                        for col in range(5):
+                            pred = output_l4_l5[:,col*3:col*3+3]
+                            gt = labels[:,col]
+                            col_i += 1
+                            loss_l4_l5 = loss_l4_l5 + criterion(pred, gt) / 5
+                        scaler.scale(loss_l4_l5).backward()
+                        scaler.unscale_(optimizer_l4_l5)
+                        torch.nn.utils.clip_grad_norm_(self.model_l4_l5.parameters(), 2.0)
+                        scaler.step(optimizer_l4_l5)
+                        scaler.update()
+                        
+                        for col in range(5):
+                            pred = output_l5_s1[:,col*3:col*3+3]
+                            gt = labels[:,col]
+                            col_i += 1
+                            loss_l5_s1 = loss_l5_s1 + criterion(pred, gt) / 5
+                        scaler.scale(loss_l5_s1).backward()
+                        scaler.unscale_(optimizer_l5_s1)
+                        torch.nn.utils.clip_grad_norm_(self.model_l5_s1.parameters(), 2.0)
+                        scaler.step(optimizer_l5_s1)
+                        scaler.update()
+
+                    loss_dis_total = (loss_l1_l2 + loss_l2_l3 + loss_l3_l4 + loss_l4_l5 + loss_l5_s1) / 5
                     
-                    scaler.scale(loss_dis_total).backward()
-                    torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1000.0)
-                    scaler.step(optimizer)
-                    scaler.update()
                     running_loss += loss_dis_total.item()
                     losses.update(loss_dis_total.item())
                     progress_bar.set_postfix({'epoch': current_epoch, 'loss': losses.avg})
-                torch.cuda.synchronize()
                 train_losses.append(running_loss / (len(train_loader) * self.batch_size))
                 valid_loss = self.validate(criterion, val_loader, autocast)
-                scheduler.step(valid_loss)
-                print("Last LR", scheduler.get_last_lr())
+                scheduler_l2_l3.step(valid_loss)
+                scheduler_l3_l4.step(valid_loss)
+                scheduler_l4_l5.step(valid_loss)
+                scheduler_l5_s1.step(valid_loss)
+                scheduler_l1_l2.step(valid_loss)
+
+                print("Last LR", scheduler_l2_l3.get_last_lr())
                 print('Train Loss: {:.4f}'.format(losses.avg))
                 print('--------------------------------')
                 # Check for overfitting
@@ -563,9 +661,17 @@ class Abstract(ABC):
                     break
                 
                 if self.save_wieghts and (early_stopping_counter == 0 or valid_loss > best_valid_loss):
-                    self.save_model(self.model, self.name + "_best_validation.pt")
+                    self.save_model(self.model_l1_l2, self.name + "_best_validation_l1_l2.pt")
+                    self.save_model(self.model_l2_l3, self.name + "_best_validation_l2_l3.pt")
+                    self.save_model(self.model_l3_l4, self.name + "_best_validation_l3_l4.pt")
+                    self.save_model(self.model_l4_l5, self.name + "_best_validation_l4_l5.pt")
+                    self.save_model(self.model_l5_s1, self.name + "_best_validation_l5_s1.pt")
             if self.save_wieghts:
-                os.rename(self.name + "_best_validation.pt", self.name + "_" + str(self.Validation_loss)+ "_fold_" + str(fold+1) + ".pt")
+                os.rename(self.name + "_best_validation_l1_l2.pt", self.name + "_" + str(self.Validation_loss)+ "_fold_" + str(fold+1) + ".pt")
+                os.rename(self.name + "_best_validation_l2_l3.pt", self.name + "_" + str(self.Validation_loss)+ "_fold_" + str(fold+1) + ".pt")
+                os.rename(self.name + "_best_validation_l3_l4.pt", self.name + "_" + str(self.Validation_loss)+ "_fold_" + str(fold+1) + ".pt")
+                os.rename(self.name + "_best_validation_l4_l5.pt", self.name + "_" + str(self.Validation_loss)+ "_fold_" + str(fold+1) + ".pt")
+                os.rename(self.name + "_best_validation_l5_s1.pt", self.name + "_" + str(self.Validation_loss)+ "_fold_" + str(fold+1) + ".pt")
 
     @staticmethod
     def plot_confusion_matrix(y_true, y_pred, classes, type_) -> None:
@@ -577,9 +683,14 @@ class Abstract(ABC):
 
 class RainDrop(Abstract):
     def __init__(self, num_classes =75, epochs: int = 10, batch_size:int = 128, save_wieghts:bool = False, load_weights:str = None) -> None:
-        self.model = CustomRain(num_classes, True).to(device)
+        self.model_l1_l2 = CustomRain(num_classes, True).to(device)
+        self.model_l2_l3 = CustomRain(num_classes, True).to(device)
+        self.model_l3_l4 = CustomRain(num_classes, True).to(device)
+        self.model_l4_l5 = CustomRain(num_classes, True).to(device)
+        self.model_l5_s1 = CustomRain(num_classes, True).to(device)
 
-        super().__init__(self.model, epochs, batch_size, save_wieghts, load_weights, lr=1.6e-4)
+        super().__init__(self.model_l1_l2, self.model_l2_l3, self.model_l3_l4, self.model_l4_l5, self.model_l5_s1,
+                          epochs, batch_size, save_wieghts, load_weights, lr=3.6e-5)
 
     def __call__(self) -> None:
         self.train()
