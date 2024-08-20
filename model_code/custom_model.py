@@ -1,9 +1,7 @@
 import torch
 
 import torch.nn as nn
-from efficientnet_pytorch import EfficientNet
-from model_code.network.vit_16_base_feat_middle_gal_v2 import vit_small_patch16_224, vit_base_patch16_256, vit_base_patch16_384
-from torchvision.models import densenet121
+from timm.models.layers import SelectAdaptivePool2d
 import timm
 
 class EfficientNetFeatureExtractor(nn.Module):
@@ -178,18 +176,151 @@ class CustomRainFirstTry(nn.Module):
 class CustomRain(nn.Module):
     def __init__(self, num_classes=75, pretrained=True):
         super().__init__()
-        self.axial_backbone = EfficientNetFeatureExtractor()
-        self.saggital_backbone = timm.create_model(
-                                    "timm/davit_small.msft_in1k",
+        # self.sagittal_stack_backbone = timm.create_model(
+        #                             "timm/swin_base_patch4_window12_384.ms_in1k",
+        #                             pretrained=pretrained, 
+        #                             features_only=False,
+        #                             in_chans=30,
+        #                             num_classes = 0
+        #                             )
+        self.axial_l1_l2_backbone = timm.create_model(
+                                    "timm/vit_small_patch14_reg4_dinov2.lvd142m",
                                     pretrained=pretrained, 
                                     features_only=False,
-                                    in_chans=40+15,
-                                    num_classes=num_classes,
+                                    in_chans=3,
+                                    num_classes=256,
                                     )
+        self.axial_l2_l3_backbone = timm.create_model(
+                                    "timm/vit_small_patch14_reg4_dinov2.lvd142m",
+                                    pretrained=pretrained, 
+                                    features_only=False,
+                                    in_chans=3,
+                                    num_classes=256,
+                                    )
+        self.axial_l3_l4_backbone = timm.create_model(
+                                    "timm/vit_small_patch14_reg4_dinov2.lvd142m",
+                                    pretrained=pretrained, 
+                                    features_only=False,
+                                    in_chans=3,
+                                    num_classes=256,
+                                    )
+        self.axial_l4_l5_backbone = timm.create_model(
+                                    "timm/vit_small_patch14_reg4_dinov2.lvd142m",
+                                    pretrained=pretrained, 
+                                    features_only=False,
+                                    in_chans=3,
+                                    num_classes=256,
+                                    )
+        self.axial_l5_s1_backbone = timm.create_model(
+                                    "timm/vit_small_patch14_reg4_dinov2.lvd142m",
+                                    pretrained=pretrained, 
+                                    features_only=False,
+                                    in_chans=3,
+                                    num_classes=256,
+                                    )
+        self.sagittal_l1_l2_backbone = timm.create_model(
+                                    "timm/convnext_nano.in12k",
+                                    pretrained=pretrained, 
+                                    features_only=False,
+                                    in_chans=5,
+                                    num_classes=256,
+                                    )
+        self.sagittal_l2_l3_backbone = timm.create_model(
+                                    "timm/convnext_nano.in12k",
+                                    pretrained=pretrained, 
+                                    features_only=False,
+                                    in_chans=5,
+                                    num_classes=256
+                                    )
+        self.sagittal_l3_l4_backbone = timm.create_model(
+                                    "timm/convnext_nano.in12k",
+                                    pretrained=pretrained, 
+                                    features_only=False,
+                                    in_chans=5,
+                                    num_classes=256,
+                                    )
+        self.sagittal_l4_l5_backbone = timm.create_model(
+                                    "timm/convnext_nano.in12k",
+                                    pretrained=pretrained, 
+                                    features_only=False,
+                                    in_chans=5,
+                                    num_classes=256,
+                                    )
+        self.sagittal_l5_s1_backbone = timm.create_model(
+                                    "timm/convnext_nano.in12k",
+                                    pretrained=pretrained, 
+                                    features_only=False,
+                                    in_chans=5,
+                                    num_classes=256,
+                                    )
+
+        self.l1_l2 = nn.Sequential(
+            nn.Linear(512, 256),
+            # nn.BatchNorm1d(128),
+            nn.Dropout(0.3),
+            nn.GELU(),
+            nn.Linear(256, 15),
+        )
+        self.l2_l3 = nn.Sequential(
+            nn.Linear(512, 256),
+            # nn.BatchNorm1d(128),
+            nn.Dropout(0.3),
+            nn.GELU(),
+            nn.Linear(256, 15),
+        )
+        self.l3_l4 = nn.Sequential(
+            nn.Linear(512, 256),
+            # nn.BatchNorm1d(128),
+            nn.Dropout(0.3),
+            nn.GELU(),
+            nn.Linear(256, 15),
+        )
+        self.l4_l5 = nn.Sequential(
+            nn.Linear(512, 256),
+            # nn.BatchNorm1d(128),
+            nn.Dropout(0.3),
+            nn.GELU(),
+            nn.Linear(256, 15),
+        )
+        self.l5_s1 = nn.Sequential(
+            nn.Linear(512, 256),
+            # nn.BatchNorm1d(128),
+            nn.Dropout(0.3),
+            nn.GELU(),
+            nn.Linear(256, 15),
+        )
         
-    def forward(self, sagittal, axial):
-        axial = self.axial_backbone(axial)
-        sagittal = torch.cat([sagittal, axial], dim=1)
-        x = self.saggital_backbone(sagittal)
+ 
+
+        
+
+    def forward(self, axial_l1_l2, sagittal_T2_l1_l2, axial_l2_l3,
+                    sagittal_T2_l2_l3, axial_l3_l4, sagittal_T2_l3_l4, axial_l4_l5,
+                      sagittal_T2_l4_l5,axial_l5_s1, sagittal_T2_l5_s1):
+        # sagittal_stack = self.sagittal_stack_backbone(sagittal_stack)
+        axial_l1_l2 = self.axial_l1_l2_backbone(axial_l1_l2)
+        axial_l2_l3 = self.axial_l2_l3_backbone(axial_l2_l3)
+        axial_l3_l4 = self.axial_l3_l4_backbone(axial_l3_l4)
+        axial_l4_l5 = self.axial_l4_l5_backbone(axial_l4_l5)
+        axial_l5_s1 = self.axial_l5_s1_backbone(axial_l5_s1)
+        sagittal_T2_l1_l2 = self.sagittal_l1_l2_backbone(sagittal_T2_l1_l2)
+        sagittal_T2_l2_l3 = self.sagittal_l2_l3_backbone(sagittal_T2_l2_l3)
+        sagittal_T2_l3_l4 = self.sagittal_l3_l4_backbone(sagittal_T2_l3_l4)
+        sagittal_T2_l4_l5 = self.sagittal_l4_l5_backbone(sagittal_T2_l4_l5)
+        sagittal_T2_l5_s1 = self.sagittal_l5_s1_backbone(sagittal_T2_l5_s1)
+        # print(sagittal_stack.shape, axial_l1_l2.shape, sagittal_T2_l1_l2.shape)
+        x1 = torch.cat([sagittal_T2_l1_l2, axial_l1_l2], dim=1)
+        x2 = torch.cat([sagittal_T2_l2_l3, axial_l2_l3], dim=1)
+        x3 = torch.cat([sagittal_T2_l3_l4, axial_l3_l4], dim=1)
+        x4 = torch.cat([sagittal_T2_l4_l5, axial_l4_l5], dim=1)
+        x5 = torch.cat([sagittal_T2_l5_s1, axial_l5_s1], dim=1)
+        x1 = self.l1_l2(x1)
+        x2 = self.l2_l3(x2)
+        x3 = self.l3_l4(x3)
+        x4 = self.l4_l5(x4)
+        x5 = self.l5_s1(x5)
+        x = torch.cat([x1, x2, x3, x4, x5], dim=1)
+
+
         return x
     

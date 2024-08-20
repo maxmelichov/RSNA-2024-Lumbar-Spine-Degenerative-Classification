@@ -2,7 +2,9 @@ import glob
 import numpy as np
 import os
 import pydicom
-from preprocessing.segmantation_inference import SegmentaionInference, label_dict_clean
+import sys
+sys.path.insert(0, r'F:\Projects\Kaggle\RSNA-2024-Lumbar-Spine-Degenerative-Classification\preprocessing')
+from segmantation_inference import SegmentaionInference, label_dict_clean
 import shutil
 from skimage.transform import resize
 from pathlib import Path
