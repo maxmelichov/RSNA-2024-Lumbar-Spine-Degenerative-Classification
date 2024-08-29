@@ -73,6 +73,7 @@ class SegmentaionInference:
     
     def prepare_data(self, dcm_path):
         image = pydicom.dcmread(dcm_path).pixel_array
+        image = (image - image.min()) / (image.max() - image.min() + 1e-6) * 255
         image = Image.fromarray(image)
         if image.mode != 'RGB':  # Ensure image is RGB
             image = image.convert('RGB')
@@ -101,9 +102,8 @@ class SegmentaionInference:
             pred = torch.argmax(torch.tensor(outputs), dim=1)
         return pred.cpu()
     
-
-    def get_class_bboxes(self, masks, classes_of_interest):
-        def scale_bboxes(bboxes, original_size, segmented_size):
+    @staticmethod
+    def scale_bboxes(bboxes, original_size, segmented_size):
             orig_h, orig_w = original_size[0], original_size[1]
             seg_h, seg_w = segmented_size
             scaled_bboxes = {}
@@ -123,6 +123,7 @@ class SegmentaionInference:
             
             return scaled_bboxes
 
+    def get_class_bboxes(self, masks, classes_of_interest):
         class_bboxes = {class_id: [] for class_id in classes_of_interest}
         
         for mask in masks:
@@ -137,7 +138,7 @@ class SegmentaionInference:
                     class_bboxes[class_id].append((y_min, x_min, height, width)) # I swapped x and y to match the format of the bounding boxes
                 else:
                     class_bboxes[class_id].append((-1, -1, -1, -1))  # Placeholder for classes not present in the mask
-        scaled_bboxes = scale_bboxes(class_bboxes, self.original_image.shape , (256, 256))
+        scaled_bboxes = self.scale_bboxes(class_bboxes, self.original_image.shape , (256, 256))
         return scaled_bboxes
     
     def inference(self, dcm_path):

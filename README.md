@@ -108,4 +108,4 @@ fold 2: after 4 fold the results on kaggle the result is much worst 1.36
 Train Loss: 0.48
 Validation Loss: 0.47
 Last LR [0.00036]
-Kaggle score: 0.64
+Kaggle score: 0.64 for fold 1 I got 0.62

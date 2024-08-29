@@ -6,11 +6,12 @@ import sys
 sys.path.insert(0, r'F:\Projects\Kaggle\RSNA-2024-Lumbar-Spine-Degenerative-Classification\preprocessing')
 from segmantation_inference import SegmentaionInference, label_dict_clean
 import shutil
-from skimage.transform import resize
+import cv2
 from pathlib import Path
 from PIL import Image
 import pandas as pd
 from typing import Union
+import matplotlib.pyplot as plt
 
 
 
@@ -37,15 +38,10 @@ class CrossReference:
         # thus we do reverse_sort=True for axial so increasing array index is craniocaudal
         idx = np.argsort(-positions if reverse_sort else positions)
         ipp = np.asarray([d.ImagePositionPatient for d in dicoms]).astype("float")[idx]
-        arrays = []
         first_dicom = pydicom.dcmread(dicom_files[0])
         target_shape = first_dicom.pixel_array.shape
-        for d in dicoms:
-            pixel_array = d.pixel_array.astype("float32")
-            if target_shape:
-                pixel_array = resize(pixel_array, target_shape, mode='reflect', anti_aliasing=True)
-            arrays.append(pixel_array)
-        array = np.stack(arrays)[idx]
+        array = np.stack([cv2.resize(d.pixel_array.astype("float32"), target_shape) for d in dicoms])
+        array = array[idx]
         sorted_files = [dicom_files[i] for i in idx]
         return {"array": CrossReference._convert_to_8bit(array), "positions": ipp, "pixel_spacing": np.asarray(dicoms[0].PixelSpacing).astype("float"), "sorted_files": sorted_files}
     
@@ -56,7 +52,7 @@ class CrossReference:
             if boxes == [(-1, -1, -1, -1)]:
                 continue
             for box in boxes:
-                _, y_min, _, height = box
+                _, y_min, height, _ = box
                 y_max = y_min + height
                 if y_min <= y <= y_max:
                     classes.append(cls)
@@ -155,30 +151,26 @@ class CrossReference:
                         os.makedirs(save_path, exist_ok=True)
                         shutil.copyfile(ax_t2["sorted_files"][i], os.path.join(save_path, file_name))
     
-    def _infer_axis_from_study_for_test(self, sag_t: dict, axs_t2: list[dict]) -> pd.DataFrame:
+    def _infer_axis_from_study_for_test(self, sag_t: dict, ax_t2: dict) -> pd.DataFrame:
+        classes_df = pd.DataFrame(columns=["path", "class_id"])
         top_left_hand_corner_sag_t2 = sag_t["positions"][len(sag_t["array"]) // 2]
         sag_y_axis_to_pixel_space = [top_left_hand_corner_sag_t2[2]]
+        
         while len(sag_y_axis_to_pixel_space) < sag_t["array"].shape[1]: 
             sag_y_axis_to_pixel_space.append(sag_y_axis_to_pixel_space[-1] - sag_t["pixel_spacing"][1])
 
-        
-        for ax_t2 in axs_t2:
-            sag_y_coord_to_axial_slice = {}
-            for ax_t2_slice, ax_t2_pos in zip(ax_t2["array"], ax_t2["positions"]):
-                diffs = np.abs(np.asarray(sag_y_axis_to_pixel_space) - ax_t2_pos[2])
-                sag_y_coord = np.argmin(diffs)
-                sag_y_coord_to_axial_slice[sag_y_coord] = ax_t2_slice
+        sag_y_coord_to_axial_slice = {}
+        for ax_t2_slice, ax_t2_pos in zip(ax_t2["array"], ax_t2["positions"]):
+            diffs = np.abs(np.asarray(sag_y_axis_to_pixel_space) - ax_t2_pos[2])
+            sag_y_coord = np.argmin(diffs)
+            sag_y_coord_to_axial_slice[sag_y_coord] = ax_t2_slice
 
-            
-            bboxes = self.segmentation.inference(sag_t["sorted_files"][len(sag_t["sorted_files"]) // 2])
-
-            classes_df = pd.DataFrame(columns=["path", "class_id"])
-            for i, y in enumerate([*sag_y_coord_to_axial_slice]):
-                classes = CrossReference._find_classes(y, bboxes)
-                class_list = []
-                if classes != -1:
-                    for cls in classes:
-                        classes_df.loc[len(classes_df)] = [ax_t2["sorted_files"][i], label_dict_clean[cls]]
+        bboxes = self.segmentation.inference(sag_t["sorted_files"][len(sag_t["sorted_files"]) // 2])
+        for i, y in enumerate([*sag_y_coord_to_axial_slice]):
+            classes = CrossReference._find_classes(y, bboxes)
+            if classes != -1:
+                for cls in classes:
+                    classes_df.loc[len(classes_df)] = [ax_t2["sorted_files"][i], label_dict_clean[cls]]
                 
         return classes_df
 
@@ -192,7 +184,7 @@ class CrossReference:
             elif row.series_description == "Sagittal T1":
                 sag_t1 = CrossReference._load_dicom_stack(os.path.join(self.image_dir, str(row.study_id), str(row.series_id)), plane="sagittal")
             elif row.series_description == "Axial T2":
-                ax_t2.append(CrossReference._load_dicom_stack(os.path.join(self.image_dir, str(row.study_id), str(row.series_id)), plane="axial", reverse_sort=True))
+                ax_t2 = CrossReference._load_dicom_stack(os.path.join(self.image_dir, str(row.study_id), str(row.series_id)), plane="axial", reverse_sort=True)
         if mode == "train":
             if sag_t2 and ax_t2:
                 self._infer_axis_from_study(sag_t2, ax_t2)

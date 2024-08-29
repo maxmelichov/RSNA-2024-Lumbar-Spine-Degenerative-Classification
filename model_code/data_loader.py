@@ -11,6 +11,7 @@ import sys
 sys.path.insert(0, r'F:\Projects\Kaggle\RSNA-2024-Lumbar-Spine-Degenerative-Classification\preprocessing')
 from segmantation_inference import SegmentaionInference
 from Cross_Reference import CrossReference
+from detection_inference import DetectionInference, transforms
 import matplotlib.pyplot as plt
 import re
 import warnings
@@ -21,10 +22,13 @@ class CFG():
     AUG_PROB = 0.75
     NOT_DEBUG = True
     AUG = True
-    Axial_shape = (518, 518)
-    Sagittal_shape = (128, 128)
+    Axial_shape = (152, 152)
+    Sagittal_shape = (152, 152)
+    channel_size_sagittal = 28
+    channel_size_axial = 4
     train_path = "train_images"
     segmentation = SegmentaionInference(model_path=r"weights\simple_unet.onnx")
+    DetectionInference = DetectionInference(model_path=r"weights\axial_detection_resnet18.pth", transforms=transforms)
     label2id = {'Normal/Mild': 0, 'Moderate':1, 'Severe':2, np.nan: -100}
     category2id = {"L1": 1, "L2": 2, "L3": 3, "L4": 4, "L5": 5, "L5-S1": 11, "L4-L5": 12, "L3-L4": 13, "L2-L3": 14, "L1-L2": 15}
     skip_study_id = [2492114990, 2780132468, 3008676218]
@@ -32,6 +36,7 @@ class CFG():
 
 cfg = CFG()
 cross_reference = CrossReference()
+LAST_AXIAL = np.zeros((cfg.Axial_shape[0], cfg.Axial_shape[1], cfg.channel_size_axial), dtype = np.uint8)
 
 transforms_axial = A.Compose([
     A.Resize(cfg.Axial_shape[0], cfg.Axial_shape[1]),
@@ -46,14 +51,14 @@ transforms_axial = A.Compose([
         A.GaussNoise(var_limit=(5.0, 30.0)),
     ], p=cfg.AUG_PROB),
 
-    A.OneOf([
-        A.OpticalDistortion(distort_limit=1.0),
-        A.GridDistortion(num_steps=5, distort_limit=1.),
-        A.ElasticTransform(alpha=3),
-    ], p=0.5),
+    # A.OneOf([
+    #     A.OpticalDistortion(distort_limit=1.0),
+    #     A.GridDistortion(num_steps=5, distort_limit=1.),
+    #     A.ElasticTransform(alpha=3),
+    # ], p=0.5),
 
-    A.ShiftScaleRotate(shift_limit=0.1, scale_limit=0.1, rotate_limit=15, border_mode=0, p=cfg.AUG_PROB),
-    A.CoarseDropout(max_holes=16, max_height=64, max_width=64, min_holes=1, min_height=8, min_width=8, p=cfg.AUG_PROB),
+    # A.ShiftScaleRotate(shift_limit=0.1, scale_limit=0.1, rotate_limit=15, border_mode=0, p=cfg.AUG_PROB),
+    A.CoarseDropout(max_holes=16, max_height=16, max_width=16, min_holes=1, min_height=4, min_width=4, p=cfg.AUG_PROB),
     A.Normalize(mean=0.5, std=0.5)
 ])
 
@@ -70,7 +75,14 @@ transforms_sagittal = A.Compose([
         A.GaussNoise(var_limit=(5.0, 30.0)),
     ], p=cfg.AUG_PROB),
 
-    A.CoarseDropout(max_holes=8, max_height=32, max_width=32, min_holes=1, min_height=8, min_width=8, p=cfg.AUG_PROB),    
+    # A.OneOf([
+    #     A.OpticalDistortion(distort_limit=1.0),
+    #     A.GridDistortion(num_steps=5, distort_limit=1.),
+    #     A.ElasticTransform(alpha=3),
+    # ], p=0.5),
+
+    # A.ShiftScaleRotate(shift_limit=0.1, scale_limit=0.1, rotate_limit=15, border_mode=0, p=cfg.AUG_PROB),
+    A.CoarseDropout(max_holes=16, max_height=16, max_width=16, min_holes=1, min_height=4, min_width=4, p=cfg.AUG_PROB),
     A.Normalize(mean=0.5, std=0.5)
 ])
 
@@ -92,6 +104,7 @@ class CustomDataset(Dataset):
         pass
     def __len__(self):
         return len(self.df_labels)
+
 
     @staticmethod
     def plot(stack,x = 5,y = 6):
@@ -188,13 +201,8 @@ class CustomDataset(Dataset):
         bbox = bboxes[category]
         x, y, h, w = bbox[0]
         image = Image.fromarray(pixel_array)
-        margin = 35 
-        cropped_image = image.crop((x - margin + 10, y - margin, x + 128 - (margin + 10), y + 128 - margin))
-        if cropped_image.size[0] < 40 or cropped_image.size[1] < 40:
-            category_new = category.split("_")[0]
-            bbox = bboxes[category_new]
-            x, y, h, w = bbox[0]
-            cropped_image = image.crop((x - margin + 10, y - margin, x + 128 - (margin + 10), y + 128 - margin))
+        margin = 152 // 2 
+        cropped_image = image.crop((x - 20, y - margin, x + 152 - 20, y + margin))
         return np.array(cropped_image)
 
     @staticmethod
@@ -244,16 +252,47 @@ class CustomDataset(Dataset):
 
     def create_stack(self, sagittal_stack, axial_stack,
                      Sagittal_T2_files, Sagittal_T2_bboxes, Sagittal_T2_path,
+                        Sagittal_T1_files, Sagittal_T1_bboxes, Sagittal_T1_path,
                      category, two_classes_category, df_classes):
-
+        global LAST_AXIAL
         k = 0
 
-        if len(Sagittal_T2_files) < 5:
-            Sagittal_T2_files = self.pad_images_list(Sagittal_T2_files, 5)
-        elif len(Sagittal_T2_files) > 5:
-            Sagittal_T2_files = self.unpad_images_list(Sagittal_T2_files, 5)
+        if len(Sagittal_T1_files) < cfg.channel_size_sagittal // 2:
+            Sagittal_T1_files = self.pad_images_list(Sagittal_T1_files, cfg.channel_size_sagittal // 2)
+        elif len(Sagittal_T1_files) > cfg.channel_size_sagittal // 2:
+            Sagittal_T1_files = self.unpad_images_list(Sagittal_T1_files, cfg.channel_size_sagittal // 2)
+        original_dicom = pydicom.dcmread(os.path.join(Sagittal_T1_path, Sagittal_T1_files[len(Sagittal_T1_files)//2])).pixel_array
+        Sagittal_T1_bboxes = cfg.segmentation.scale_bboxes(Sagittal_T1_bboxes, (512, 512), original_dicom.shape)
+        for file in Sagittal_T1_files:
+            original_dicom = pydicom.dcmread(os.path.join(Sagittal_T1_path, file)).pixel_array
+            original_dicom = np.array(self.resize_image(original_dicom, (512, 512)))
+            original_dicom = (original_dicom - original_dicom.min()) / (original_dicom.max() - original_dicom.min() + 1e-6) * 255
+            new_pixel_array = self.center_crop_by_category(original_dicom, Sagittal_T1_bboxes,
+                                                           cfg.category2id[two_classes_category])
+            # resized_pixel_array = self.resize_image(new_pixel_array, (cfg.Sagittal_shape[0], cfg.Sagittal_shape[1]))
+            new_shape = new_pixel_array.shape
+            # Ensure the padded array is large enough to hold new_pixel_array
+            padded_array = np.zeros((max(cfg.Sagittal_shape[0], new_shape[0]), max(cfg.Sagittal_shape[1], new_shape[1])))
+
+            # Compute the starting indices for centering the new_pixel_array
+            start_x = (padded_array.shape[0] - new_shape[0]) // 2
+            start_y = (padded_array.shape[1] - new_shape[1]) // 2
+
+            # Place the new_pixel_array in the center of the padded_array
+            padded_array[start_x:start_x + new_shape[0], start_y:start_y + new_shape[1]] = new_pixel_array
+            sagittal_stack[..., k] = padded_array[:cfg.Sagittal_shape[0], :cfg.Sagittal_shape[1]].astype(np.uint8)
+            k += 1
+
+
+        if len(Sagittal_T2_files) < cfg.channel_size_sagittal // 2:
+            Sagittal_T2_files = self.pad_images_list(Sagittal_T2_files, cfg.channel_size_sagittal//2)
+        elif len(Sagittal_T2_files) > cfg.channel_size_sagittal // 2:
+            Sagittal_T2_files = self.unpad_images_list(Sagittal_T2_files, cfg.channel_size_sagittal//2)
+        original_dicom = pydicom.dcmread(os.path.join(Sagittal_T2_path, Sagittal_T2_files[len(Sagittal_T2_files)//2])).pixel_array
+        Sagittal_T2_bboxes = cfg.segmentation.scale_bboxes(Sagittal_T2_bboxes, (512, 512), original_dicom.shape)
         for file in Sagittal_T2_files:
             original_dicom = pydicom.dcmread(os.path.join(Sagittal_T2_path, file)).pixel_array
+            original_dicom = np.array(self.resize_image(original_dicom, (512, 512)))
             original_dicom = (original_dicom - original_dicom.min()) / (original_dicom.max() - original_dicom.min() + 1e-6) * 255
             new_pixel_array = self.center_crop_by_category(original_dicom, Sagittal_T2_bboxes,
                                                            cfg.category2id[two_classes_category])
@@ -268,7 +307,7 @@ class CustomDataset(Dataset):
 
             # Place the new_pixel_array in the center of the padded_array
             padded_array[start_x:start_x + new_shape[0], start_y:start_y + new_shape[1]] = new_pixel_array
-            sagittal_stack[..., k] = padded_array[:cfg.Sagittal_shape[0], :cfg.Sagittal_shape[1]]
+            sagittal_stack[..., k] = padded_array[:cfg.Sagittal_shape[0], :cfg.Sagittal_shape[1]].astype(np.uint8)
             k += 1
         
         
@@ -279,20 +318,41 @@ class CustomDataset(Dataset):
         l = sorted(l, key=self.extract_number)
 
         if len(l) == 0:
+            axial_stack = LAST_AXIAL
             return sagittal_stack, axial_stack
         
-        if len(l) < 3:
-            l = self.pad_images_list(l, 3)
+        if len(l) < cfg.channel_size_axial:
+            l = self.pad_images_list(l, cfg.channel_size_axial)
 
-        elif len(l) > 3:
-            l = self.unpad_images_list(l, 3)
+        elif len(l) > cfg.channel_size_axial:
+            l = self.unpad_images_list(l, cfg.channel_size_axial)
         
+        def crop_center(image, bbox):
+                min_x, max_x = 999999, -1
+                min_y, max_y = 999999, -1
+                for x, y, h, w in bbox:
+                    min_x = min(min_x, x)
+                    max_x = max(max_x, x+w)
+                    min_y = min(min_y, y)
+                    max_y = max(max_y, y+h)
+                if type(image) != Image.Image:
+                    image = Image.fromarray(image) 
+                # Crop the center of the image
+                margin = 152 // 2
+                return image.crop((min_x - margin, min_y - 50, min_x + margin, min_y + 102))
         k = 0
         for file in l:
             original_dicom = pydicom.dcmread(file).pixel_array
+            bbox = cfg.DetectionInference.inference(original_dicom, 512, 512)
             original_dicom = (original_dicom - original_dicom.min()) / (original_dicom.max() - original_dicom.min() + 1e-6) * 255
-            axial_stack[..., k] = self.resize_image(original_dicom, (cfg.Axial_shape[0], cfg.Axial_shape[1]))
+            original_dicom = original_dicom.astype(np.uint8)
+            resized_pixel_array = self.resize_image(original_dicom, (512,512))
+            # Crop the center of the DICOM image
+            cropped_image = crop_center(resized_pixel_array, bbox)
+            axial_stack[..., k] = np.array(cropped_image).astype(np.uint8)
+            sagittal_stack[..., k + 28] = np.array(cropped_image).astype(np.uint8)
             k += 1
+        LAST_AXIAL = axial_stack
         
         return sagittal_stack, axial_stack
 
@@ -314,16 +374,16 @@ class CustomDataset(Dataset):
     
     def __getitem__(self, index):
         # sagittal_stack = np.zeros((cfg.Sagittal_shape[0], cfg.Sagittal_shape[1], 30), dtype = np.uint8)
-        sagittal_l1_l2 = np.zeros((cfg.Sagittal_shape[0], cfg.Sagittal_shape[1], 5), dtype = np.uint8)
-        axial_l1_l2 = np.zeros((cfg.Axial_shape[0], cfg.Axial_shape[1], 3), dtype = np.uint8)
-        sagittal_l2_l3 = np.zeros((cfg.Sagittal_shape[0], cfg.Sagittal_shape[1], 5), dtype = np.uint8)
-        axial_l2_l3 = np.zeros((cfg.Axial_shape[0], cfg.Axial_shape[1], 3), dtype = np.uint8)
-        sagittal_l3_l4 = np.zeros((cfg.Sagittal_shape[0], cfg.Sagittal_shape[1], 5), dtype = np.uint8)
-        axial_l3_l4 = np.zeros((cfg.Axial_shape[0], cfg.Axial_shape[1], 3), dtype = np.uint8)
-        sagittal_l4_l5 = np.zeros((cfg.Sagittal_shape[0], cfg.Sagittal_shape[1], 5), dtype = np.uint8)
-        axial_l4_l5 = np.zeros((cfg.Axial_shape[0], cfg.Axial_shape[1], 3), dtype = np.uint8)
-        sagittal_l5_s1 = np.zeros((cfg.Sagittal_shape[0], cfg.Sagittal_shape[1], 5), dtype = np.uint8)
-        axial_l5_s1 = np.zeros((cfg.Axial_shape[0], cfg.Axial_shape[1], 3), dtype = np.uint8)
+        sagittal_l1_l2 = np.zeros((cfg.Sagittal_shape[0], cfg.Sagittal_shape[1], cfg.channel_size_sagittal + cfg.channel_size_axial), dtype = np.uint8)
+        axial_l1_l2 = np.zeros((cfg.Axial_shape[0], cfg.Axial_shape[1], cfg.channel_size_axial), dtype = np.uint8)
+        sagittal_l2_l3 = np.zeros((cfg.Sagittal_shape[0], cfg.Sagittal_shape[1], cfg.channel_size_sagittal + cfg.channel_size_axial), dtype = np.uint8)
+        axial_l2_l3 = np.zeros((cfg.Axial_shape[0], cfg.Axial_shape[1], cfg.channel_size_axial), dtype = np.uint8)
+        sagittal_l3_l4 = np.zeros((cfg.Sagittal_shape[0], cfg.Sagittal_shape[1], cfg.channel_size_sagittal + cfg.channel_size_axial), dtype = np.uint8)
+        axial_l3_l4 = np.zeros((cfg.Axial_shape[0], cfg.Axial_shape[1], cfg.channel_size_axial), dtype = np.uint8)
+        sagittal_l4_l5 = np.zeros((cfg.Sagittal_shape[0], cfg.Sagittal_shape[1], cfg.channel_size_sagittal + cfg.channel_size_axial), dtype = np.uint8)
+        axial_l4_l5 = np.zeros((cfg.Axial_shape[0], cfg.Axial_shape[1], cfg.channel_size_axial), dtype = np.uint8)
+        sagittal_l5_s1 = np.zeros((cfg.Sagittal_shape[0], cfg.Sagittal_shape[1], cfg.channel_size_sagittal + cfg.channel_size_axial), dtype = np.uint8)
+        axial_l5_s1 = np.zeros((cfg.Axial_shape[0], cfg.Axial_shape[1], cfg.channel_size_axial), dtype = np.uint8)
 
         
         study_id = self.df_labels.iloc[index]['study_id']
@@ -345,6 +405,20 @@ class CustomDataset(Dataset):
                 Sagittal_T1_path = sub_set[col].iloc[0]
                 Sagittal_T1_files = os.listdir(Sagittal_T1_path)
                 Sagittal_T1_files = sorted(Sagittal_T1_files, key=self.extract_number)
+                middle_index = len(Sagittal_T1_files) // 2
+                Sagittal_T1_bboxes = cfg.segmentation.inference(os.path.join(Sagittal_T1_path, Sagittal_T1_files[middle_index]))
+                if _count_neg_ones(Sagittal_T1_bboxes) != 0:
+                    pmin = len(Sagittal_T1_files) // 2 - 5
+                    pmax = len(Sagittal_T1_files) // 2 + 5
+                    for p in range(pmin, pmax):
+                        temp = cfg.segmentation.inference(os.path.join(Sagittal_T1_path, Sagittal_T1_files[p]))
+                        for key, value in temp.items():
+                            if value != [(-1, -1, -1, -1)]:
+                                if key not in Sagittal_T1_bboxes or Sagittal_T1_bboxes[key] == [(-1, -1, -1, -1)]:
+                                    Sagittal_T1_bboxes[key] = value
+                        if _count_neg_ones(Sagittal_T1_bboxes) == 0:
+                            break
+
             
             elif col == "general_path_to_Sagittal_T2":
                 Sagittal_T2_path = sub_set[col].iloc[0]
@@ -353,7 +427,9 @@ class CustomDataset(Dataset):
                 middle_index = len(Sagittal_T2_files) // 2
                 Sagittal_T2_bboxes = cfg.segmentation.inference(os.path.join(Sagittal_T2_path, Sagittal_T2_files[middle_index]))
                 if _count_neg_ones(Sagittal_T2_bboxes) != 0:
-                    for p in range(len(Sagittal_T2_files)):
+                    pmin = len(Sagittal_T2_files) // 2 - 5
+                    pmax = len(Sagittal_T2_files) // 2 + 5
+                    for p in range(pmin, pmax):
                         temp = cfg.segmentation.inference(os.path.join(Sagittal_T2_path, Sagittal_T2_files[p]))
                         for key, value in temp.items():
                             if value != [(-1, -1, -1, -1)]:
@@ -366,38 +442,40 @@ class CustomDataset(Dataset):
         # df_classes = self.divide_Axiel(decription_df)
         
         df_classes = cross_reference.get_cross_reference_for_Axial(decription_df, "test")
+        # print(df_classes)
 
             
         
         sagittal_l1_l2, axial_l1_l2 = self.create_stack(sagittal_l1_l2, axial_l1_l2,
-                                                         Sagittal_T2_files, Sagittal_T2_bboxes,
-                                        Sagittal_T2_path, "L1", "L1-L2", df_classes)
+                                                        Sagittal_T2_files, Sagittal_T2_bboxes, Sagittal_T2_path,
+                                                        Sagittal_T1_files, Sagittal_T1_bboxes, Sagittal_T1_path,
+                                                        "L1", "L1-L2", df_classes)
         
         sagittal_l2_l3, axial_l2_l3 = self.create_stack(sagittal_l2_l3, axial_l2_l3,
-                                                         Sagittal_T2_files, Sagittal_T2_bboxes,
-                                        Sagittal_T2_path,
+                                                        Sagittal_T2_files, Sagittal_T2_bboxes, Sagittal_T2_path,
+                                                        Sagittal_T1_files, Sagittal_T1_bboxes, Sagittal_T1_path,
                                         "L2", "L2-L3", df_classes)
         
         sagittal_l3_l4, axial_l3_l4 = self.create_stack(sagittal_l3_l4, axial_l3_l4,
-                                                         Sagittal_T2_files, Sagittal_T2_bboxes,
-                                        Sagittal_T2_path,
+                                                        Sagittal_T2_files, Sagittal_T2_bboxes, Sagittal_T2_path,
+                                                        Sagittal_T1_files, Sagittal_T1_bboxes, Sagittal_T1_path,
                                         "L3", "L3-L4", df_classes)
                                         
         sagittal_l4_l5, axial_l4_l5 = self.create_stack(sagittal_l4_l5, axial_l4_l5,
-                                                         Sagittal_T2_files, Sagittal_T2_bboxes,
-                                        Sagittal_T2_path,
+                                                        Sagittal_T2_files, Sagittal_T2_bboxes, Sagittal_T2_path,
+                                                        Sagittal_T1_files, Sagittal_T1_bboxes, Sagittal_T1_path,
                                         "L4", "L4-L5", df_classes)
         
         sagittal_l5_s1, axial_l5_s1 = self.create_stack(sagittal_l5_s1, axial_l5_s1,
-                                                         Sagittal_T2_files, Sagittal_T2_bboxes,
-                                        Sagittal_T2_path,
+                                                        Sagittal_T2_files, Sagittal_T2_bboxes, Sagittal_T2_path,
+                                                        Sagittal_T1_files, Sagittal_T1_bboxes, Sagittal_T1_path,
                                         "L5", "L5-S1", df_classes)
         
-        # self.plot(sagittal_l5_s1[...,], x = 1, y = 5)
-        # self.plot(sagittal_l2_l3[...,], x = 1, y = 5)
-        # self.plot(sagittal_l3_l4[...,], x = 1, y = 5)
-        # self.plot(sagittal_l4_l5[...,], x = 1, y = 5)
-        # self.plot(sagittal_l5_s1[...,], x = 1, y = 5)
+        self.plot(sagittal_l1_l2[...,], x = 4, y = 8)
+        self.plot(sagittal_l2_l3[...,], x = 4, y = 8)
+        self.plot(sagittal_l3_l4[...,], x = 4, y = 8)
+        self.plot(sagittal_l4_l5[...,], x = 4, y = 8)
+        self.plot(sagittal_l5_s1[...,], x = 4, y = 8)
         # self.plot(axial_l1_l2[...,],x= 1, y = 3)
         # self.plot(axial_l2_l3[...,],x= 1, y = 3)
         # self.plot(axial_l3_l4[...,],x= 1, y = 3)
@@ -418,7 +496,11 @@ class CustomDataset(Dataset):
             axial_l4_l5 = self.transforms_axial(image=axial_l4_l5)['image']
             axial_l5_s1 = self.transforms_axial(image=axial_l5_s1)['image']
 
-
+        # self.plot(sagittal_l1_l2[...,], x = 3, y = 4)
+        # self.plot(sagittal_l2_l3[...,], x = 3, y = 4)
+        # self.plot(sagittal_l3_l4[...,], x = 3, y = 4)
+        # self.plot(sagittal_l4_l5[...,], x = 3, y = 4)
+        # self.plot(sagittal_l5_s1[...,], x = 3, y = 4)
         # self.plot(axial_l1_l2[...,])
         # self.plot(axial_l1_l2[...,])
         # self.plot(axial_l1_l2[...,])
@@ -456,7 +538,7 @@ def data_loader(train_data: Path, labels_path: Path, description_path: Path, mod
         tuple[DataLoader, DataLoader]: A tuple containing two DataLoaders.
     """
     if mode == "train":
-        custom_train = CustomDataset(train_data, labels_path, description_path, transforms_sagittal=transforms_val, transforms_axial=transforms_axial)
+        custom_train = CustomDataset(train_data, labels_path, description_path, transforms_sagittal=transforms_sagittal, transforms_axial=transforms_axial)
         return custom_train
     else:
         custom_val = CustomDataset(train_data, labels_path, description_path, transforms_sagittal=transforms_val, transforms_axial=transforms_val)

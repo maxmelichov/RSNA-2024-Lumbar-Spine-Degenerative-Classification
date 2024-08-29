@@ -21,7 +21,7 @@ import pandas as pd
 from sklearn.model_selection import KFold
 from utils import AverageMeter, FocalLossWithWeights, FocalLoss
 from data_loader import data_loader
-from custom_model import CustomRain
+from custom_model import CustomRain, MultiTaskModelDifferentInputs
 
 
 
@@ -213,18 +213,47 @@ class Abstract(ABC):
                 labels = reordered_labels.cuda().to(torch.long)
     
                 loss_dis = 0.0
-
+                loss_total = 0.0
                 with autocast:
-                    outputs = self.model(axial_l1_l2, sagittal_T2_l1_l2, axial_l2_l3,
-                                             sagittal_T2_l2_l3, axial_l3_l4, sagittal_T2_l3_l4, axial_l4_l5, sagittal_T2_l4_l5,
-                                               axial_l5_s1, sagittal_T2_l5_s1)
-
-                    
-                    for col in range(25):
+                    outputs = self.model(sagittal_T2_l1_l2)
+                    for col in range(5):
                         pred = outputs[:,col*3:col*3+3]
                         gt = labels[:,col]
-                        loss_dis = loss_dis + loss_fn(pred, gt) / 25
-                    loss_total = loss_dis
+                        loss_dis = loss_dis + loss_fn(pred, gt) / 5
+                    loss_total += loss_dis
+                    loss_dis = 0.0
+
+                    outputs = self.model(sagittal_T2_l2_l3)
+                    for col in range(5):
+                        pred = outputs[:,col*3:col*3+3]
+                        gt = labels[:,col+5]
+                        loss_dis = loss_dis + loss_fn(pred, gt) / 5
+                    loss_total += loss_dis
+                    loss_dis = 0.0
+
+                    outputs = self.model(sagittal_T2_l3_l4)
+                    for col in range(5):
+                        pred = outputs[:,col*3:col*3+3]
+                        gt = labels[:,col+10]
+                        loss_dis = loss_dis + loss_fn(pred, gt) / 5
+                    loss_total += loss_dis
+                    loss_dis = 0.0
+
+                    outputs = self.model(sagittal_T2_l4_l5)
+                    for col in range(5):
+                        pred = outputs[:,col*3:col*3+3]
+                        gt = labels[:,col+15]
+                        loss_dis = loss_dis + loss_fn(pred, gt) / 5
+                    loss_total += loss_dis
+                    loss_dis = 0.0
+
+                    outputs = self.model(sagittal_T2_l5_s1)
+                    for col in range(5):
+                        pred = outputs[:,col*3:col*3+3]
+                        gt = labels[:,col+20]
+                        loss_dis = loss_dis + loss_fn(pred, gt) / 5
+                    loss_total += loss_dis
+                loss_total /= 5
                 losses.update(loss_total.item())
                 progress_bar.set_postfix({'loss':losses.avg})
         print("Validation Loss: ", losses.avg)
@@ -269,8 +298,8 @@ class Abstract(ABC):
             train_subset = torch.utils.data.Subset(train_dataset, train_idx)
             val_subset = torch.utils.data.Subset(train_dataset, val_idx)
 
-            train_loader = DataLoader(train_subset, batch_size=self.batch_size, shuffle = True, pin_memory=True, num_workers=2)
-            val_loader = DataLoader(val_subset, batch_size=self.batch_size, shuffle=False, pin_memory=True, num_workers=4)
+            train_loader = DataLoader(train_subset, batch_size=self.batch_size, shuffle = True, pin_memory=True, num_workers=8)
+            val_loader = DataLoader(val_subset, batch_size=self.batch_size, shuffle=False, pin_memory=True, num_workers=8)
             # validation_loader_2 = DataLoader(validation_dataset, batch_size=self.batch_size, shuffle=False, num_workers=4)
 
             for current_epoch in range(self.epochs):
@@ -298,22 +327,76 @@ class Abstract(ABC):
 
                     
                     loss = 0.0
-
+                    loss_dis_total = 0.0
                     with autocast:
                         # outputs = outputs.reshape(-1, 3, 25)
                         optimizer.zero_grad()
-                        output = self.model(axial_l1_l2, sagittal_T2_l1_l2, axial_l2_l3,
-                                             sagittal_T2_l2_l3, axial_l3_l4, sagittal_T2_l3_l4, axial_l4_l5, sagittal_T2_l4_l5,
-                                               axial_l5_s1, sagittal_T2_l5_s1)
-                        for col in range(25):
+                        output = self.model(sagittal_T2_l1_l2)
+                        for col in range(5):
                             pred = output[:,col*3:col*3+3]
                             gt = labels[:,col]
-                            loss = loss + criterion(pred, gt) / 25
+                            loss = loss + criterion(pred, gt) / 5
                         loss.backward()
                         # scaler.unscale_(optimizer_l1_l2)
-                        torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
+                        torch.nn.utils.clip_grad_norm_(self.model.parameters(), 2.0)
                         optimizer.step()
-                    loss_dis_total = loss
+                        loss_dis_total += loss
+                        loss = 0.0
+
+                        optimizer.zero_grad()
+                        output = self.model(sagittal_T2_l2_l3)
+                        for col in range(5):
+                            pred = output[:,col*3:col*3+3]
+                            gt = labels[:,col+5]
+                            loss = loss + criterion(pred, gt) / 5
+                        loss.backward()
+                        # scaler.unscale_(optimizer_l2_l3)
+                        torch.nn.utils.clip_grad_norm_(self.model.parameters(), 2.0)
+                        optimizer.step()
+                        loss_dis_total += loss
+                        loss = 0.0
+
+                        optimizer.zero_grad()
+                        output = self.model(sagittal_T2_l3_l4)
+                        for col in range(5):
+                            pred = output[:,col*3:col*3+3]
+                            gt = labels[:,col+10]
+                            loss = loss + criterion(pred, gt) / 5
+                        loss.backward()
+                        # scaler.unscale_(optimizer_l3_l4)
+                        torch.nn.utils.clip_grad_norm_(self.model.parameters(), 2.0)
+                        optimizer.step()
+                        loss_dis_total += loss
+                        loss = 0.0
+
+                        optimizer.zero_grad()
+                        output = self.model(sagittal_T2_l4_l5)
+                        for col in range(5):
+                            pred = output[:,col*3:col*3+3]
+                            gt = labels[:,col+15]
+                            loss = loss + criterion(pred, gt) / 5
+                        loss.backward()
+                        # scaler.unscale_(optimizer_l4_l5)
+                        torch.nn.utils.clip_grad_norm_(self.model.parameters(), 2.0)
+                        optimizer.step()
+                        loss_dis_total += loss
+                        loss = 0.0
+
+                        optimizer.zero_grad()
+                        output = self.model(sagittal_T2_l5_s1)
+                        for col in range(5):
+                            pred = output[:,col*3:col*3+3]
+                            gt = labels[:,col+20]
+                            loss = loss + criterion(pred, gt) / 5
+                        loss.backward()
+                        # scaler.unscale_(optimizer_s1)
+                        torch.nn.utils.clip_grad_norm_(self.model.parameters(), 2.0)
+                        optimizer.step()
+                        loss_dis_total += loss
+                        loss = 0.0
+                    
+
+                    loss_dis_total /= 5
                     
                     running_loss += loss_dis_total.item()
                     losses.update(loss_dis_total.item())
@@ -373,6 +456,8 @@ class Abstract(ABC):
 class RainDrop(Abstract):
     def __init__(self, num_classes =75, epochs: int = 10, batch_size:int = 128, save_wieghts:bool = False, load_weights:str = None) -> None:
         self.model = CustomRain(num_classes, True).to(device)
+        if load_weights:
+            self.model = Abstract.load_model(self.model, load_weights)
         # self.model_l2_l3 = CustomRain(num_classes, True).to(device)
         # self.model_l3_l4 = CustomRain(num_classes, True).to(device)
         # self.model_l4_l5 = CustomRain(num_classes, True).to(device)
@@ -385,5 +470,5 @@ class RainDrop(Abstract):
 
 
 if __name__ == "__main__":
-    model = RainDrop(num_classes=15, epochs=5, batch_size=8, save_wieghts=True)
+    model = RainDrop(num_classes=15, epochs=20, batch_size=8, save_wieghts=True)
     model()
