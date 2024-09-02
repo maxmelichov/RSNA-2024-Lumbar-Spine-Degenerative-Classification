@@ -94,7 +94,7 @@ Validation Loss: 0.7
 Last LR [0.00036]
 Kaggle score: 0.8
 
-## Trial 5:
+## Trial 6:
 #### Summary:
 
 The model is designed to take in axial and sagittal MRI scans of different sections of the lumbar spine, extract features using powerful pre-trained deep learning models (ViT for axial and ConvNeXt for sagittal), and then combine these features to predict some region-specific outcomes. The use of separate backbones for different regions and the combination of axial and sagittal features makes the model highly specialized for analyzing lumbar spine MRI data.
@@ -109,3 +109,14 @@ Train Loss: 0.48
 Validation Loss: 0.47
 Last LR [0.00036]
 Kaggle score: 0.64 for fold 1 I got 0.62
+
+## Trial 7:
+#### Summary:
+In this trial, a single model was used sequentially for different types of images: Sagittal_T1 first, followed by Sagittal_T2, and finally the last three images of Axial_T2. The preprocessing involved cutting the appropriate spinal levels for the Sagittal images and extracting the central part of the Axial images to ensure a consistent size of 152x152 pixels. The images were processed with a total of 29 color channels.
+Model used: timm/edgenext_base.in21k_ft_in1k
+Number of epochs: 5
+Results:
+Training Loss: 0.52
+Validation Loss: 0.57
+Last Learning Rate: 0.00036
+Kaggle Score: 0.55
