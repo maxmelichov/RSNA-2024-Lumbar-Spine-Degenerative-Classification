@@ -21,7 +21,7 @@ import pandas as pd
 from sklearn.model_selection import KFold
 from utils import AverageMeter, FocalLossWithWeights, FocalLoss
 from data_loader import data_loader
-from custom_model import CustomRain, MultiTaskModelDifferentInputs
+from custom_model import CustomRain
 
 
 
@@ -297,10 +297,11 @@ class Abstract(ABC):
             early_stopping_counter = 0
             train_subset = torch.utils.data.Subset(train_dataset, train_idx)
             val_subset = torch.utils.data.Subset(train_dataset, val_idx)
+            validation_subset = torch.utils.data.Subset(validation_dataset, val_idx)
 
             train_loader = DataLoader(train_subset, batch_size=self.batch_size, shuffle = True, pin_memory=True, num_workers=8)
             val_loader = DataLoader(val_subset, batch_size=self.batch_size, shuffle=False, pin_memory=True, num_workers=8)
-            # validation_loader_2 = DataLoader(validation_dataset, batch_size=self.batch_size, shuffle=False, num_workers=4)
+            validation_loader = DataLoader(validation_subset, batch_size=self.batch_size, shuffle=False, num_workers=8)
 
             for current_epoch in range(self.epochs):
                 print('Epoch {}/{}'.format(current_epoch+1, self.epochs))
@@ -329,7 +330,6 @@ class Abstract(ABC):
                     loss = 0.0
                     loss_dis_total = 0.0
                     with autocast:
-                        # outputs = outputs.reshape(-1, 3, 25)
                         optimizer.zero_grad()
                         output = self.model(sagittal_T2_l1_l2)
                         for col in range(5):
@@ -337,7 +337,6 @@ class Abstract(ABC):
                             gt = labels[:,col]
                             loss = loss + criterion(pred, gt) / 5
                         loss.backward()
-                        # scaler.unscale_(optimizer_l1_l2)
                         torch.nn.utils.clip_grad_norm_(self.model.parameters(), 2.0)
                         optimizer.step()
                         loss_dis_total += loss
@@ -350,7 +349,6 @@ class Abstract(ABC):
                             gt = labels[:,col+5]
                             loss = loss + criterion(pred, gt) / 5
                         loss.backward()
-                        # scaler.unscale_(optimizer_l2_l3)
                         torch.nn.utils.clip_grad_norm_(self.model.parameters(), 2.0)
                         optimizer.step()
                         loss_dis_total += loss
@@ -363,7 +361,6 @@ class Abstract(ABC):
                             gt = labels[:,col+10]
                             loss = loss + criterion(pred, gt) / 5
                         loss.backward()
-                        # scaler.unscale_(optimizer_l3_l4)
                         torch.nn.utils.clip_grad_norm_(self.model.parameters(), 2.0)
                         optimizer.step()
                         loss_dis_total += loss
@@ -376,7 +373,6 @@ class Abstract(ABC):
                             gt = labels[:,col+15]
                             loss = loss + criterion(pred, gt) / 5
                         loss.backward()
-                        # scaler.unscale_(optimizer_l4_l5)
                         torch.nn.utils.clip_grad_norm_(self.model.parameters(), 2.0)
                         optimizer.step()
                         loss_dis_total += loss
@@ -389,13 +385,10 @@ class Abstract(ABC):
                             gt = labels[:,col+20]
                             loss = loss + criterion(pred, gt) / 5
                         loss.backward()
-                        # scaler.unscale_(optimizer_s1)
                         torch.nn.utils.clip_grad_norm_(self.model.parameters(), 2.0)
                         optimizer.step()
                         loss_dis_total += loss
                         loss = 0.0
-                    
-
                     loss_dis_total /= 5
                     
                     running_loss += loss_dis_total.item()
@@ -403,12 +396,10 @@ class Abstract(ABC):
                     progress_bar.set_postfix({'epoch': current_epoch, 'loss': losses.avg})
                 train_losses.append(running_loss / (len(train_loader) * self.batch_size))
                 valid_loss = self.validate(criterion, val_loader, autocast)
-                # validation_2 = self.validate(criterion, validation_loader_2, autocast)
+                valid_loss_2 = self.validate(criterion, validation_loader, autocast)
+               
                 scheduler.step(valid_loss)
-                # scheduler_l2_l3.step(valid_loss)
-                # scheduler_l3_l4.step(valid_loss)
-                # scheduler_l4_l5.step(valid_loss)
-                # scheduler_l5_s1.step(valid_loss)
+
                 
 
                 print("Last LR", scheduler.get_last_lr())
@@ -429,22 +420,13 @@ class Abstract(ABC):
                 save_path = r"F:\Projects\Kaggle\RSNA-2024-Lumbar-Spine-Degenerative-Classification"
                 if self.save_wieghts and (early_stopping_counter == 0 or valid_loss < best_valid_loss):
                     self.save_model(self.model, os.path.join(save_path ,self.name + "_best_validation.pt"))
-                    # self.save_model(self.model_l1_l2, os.path.join(save_path ,self.name + "_best_validation_l1_l2.pt"))
-                    # self.save_model(self.model_l2_l3, os.path.join(save_path ,self.name + "_best_validation_l2_l3.pt"))
-                    # self.save_model(self.model_l3_l4, os.path.join(save_path ,self.name + "_best_validation_l3_l4.pt"))
-                    # self.save_model(self.model_l4_l5, os.path.join(save_path ,self.name + "_best_validation_l4_l5.pt"))
-                    # self.save_model(self.model_l5_s1, os.path.join(save_path ,self.name + "_best_validation_l5_s1.pt"))
+
             
             if self.save_wieghts:
                 old_path = os.path.join(save_path, self.name + "_best_validation.pt")
                 new_path = os.path.join(save_path, self.name + f"_{self.Validation_loss}_fold_{fold+1}.pt")
                 os.rename(old_path, new_path)
-                # self.save_model(self.model_l1_l2, os.path.join(save_path ,self.name + "_best_validation.pt"))
-                # models = ['l1_l2', 'l2_l3', 'l3_l4', 'l4_l5', 'l5_s1']
-                # for model in models:
-                #     old_path = os.path.join(save_path, self.name + f"_best_validation_{model}.pt")
-                #     new_path = os.path.join(save_path, self.name + f"_{model}_{self.Validation_loss}_fold_{fold+1}.pt")
-                #     os.rename(old_path, new_path)
+
     @staticmethod
     def plot_confusion_matrix(y_true, y_pred, classes, type_) -> None:
         y_true = np.asarray(y_true)
@@ -458,10 +440,6 @@ class RainDrop(Abstract):
         self.model = CustomRain(num_classes, True).to(device)
         if load_weights:
             self.model = Abstract.load_model(self.model, load_weights)
-        # self.model_l2_l3 = CustomRain(num_classes, True).to(device)
-        # self.model_l3_l4 = CustomRain(num_classes, True).to(device)
-        # self.model_l4_l5 = CustomRain(num_classes, True).to(device)
-        # self.model_l5_s1 = CustomRain(num_classes, True).to(device)
 
         super().__init__(self.model, epochs, batch_size, save_wieghts, load_weights, lr=3.6e-5)
 
