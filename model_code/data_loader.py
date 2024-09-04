@@ -162,7 +162,7 @@ class CustomDataset(Dataset):
         global COUNT
         bbox = bboxes[category]
         x, y, h, w = bbox[0]
-        if x == -1 or y == -1 or h == -1 or w == -1:
+        if x == -1 or y == -1:
             COUNT+=1
             print(COUNT)
         image = Image.fromarray(pixel_array)
