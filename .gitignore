@@ -37,3 +37,4 @@ detection_coordinates.csv
 submission_check.csv
 submission_check.csv
 detection_coordinates.csv
+weights/axial_detection_resnet18.pth

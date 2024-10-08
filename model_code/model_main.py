@@ -232,7 +232,11 @@ class Abstract(ABC):
                 with autocast:
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
                     outputs = self.model(sagittal_T2_l1_l2, torch.tensor(0, device=device))
+=======
+                    outputs = self.model(sagittal_T2_l1_l2, axial_l1_l2)
+>>>>>>> main
 =======
                     outputs = self.model(sagittal_T2_l1_l2, axial_l1_l2)
 >>>>>>> main
@@ -248,7 +252,11 @@ class Abstract(ABC):
 
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
                     outputs = self.model(sagittal_T2_l2_l3, torch.tensor(1, device=device))
+=======
+                    outputs = self.model(sagittal_T2_l2_l3, axial_l2_l3)
+>>>>>>> main
 =======
                     outputs = self.model(sagittal_T2_l2_l3, axial_l2_l3)
 >>>>>>> main
@@ -264,7 +272,11 @@ class Abstract(ABC):
 
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
                     outputs = self.model(sagittal_T2_l3_l4, torch.tensor(2, device=device))
+=======
+                    outputs = self.model(sagittal_T2_l3_l4, axial_l3_l4)
+>>>>>>> main
 =======
                     outputs = self.model(sagittal_T2_l3_l4, axial_l3_l4)
 >>>>>>> main
@@ -280,7 +292,11 @@ class Abstract(ABC):
 
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
                     outputs = self.model(sagittal_T2_l4_l5, torch.tensor(3, device=device))
+=======
+                    outputs = self.model(sagittal_T2_l4_l5, axial_l4_l5)
+>>>>>>> main
 =======
                     outputs = self.model(sagittal_T2_l4_l5, axial_l4_l5)
 >>>>>>> main
@@ -296,7 +312,11 @@ class Abstract(ABC):
 
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
                     outputs = self.model(sagittal_T2_l5_s1, torch.tensor(4, device=device))
+=======
+                    outputs = self.model(sagittal_T2_l5_s1, axial_l5_s1)
+>>>>>>> main
 =======
                     outputs = self.model(sagittal_T2_l5_s1, axial_l5_s1)
 >>>>>>> main
@@ -348,11 +368,19 @@ class Abstract(ABC):
             val_subset = torch.utils.data.Subset(train_dataset, val_idx)
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
             validation_subset = torch.utils.data.Subset(validation_dataset, val_idx)
 
             train_loader = DataLoader(train_subset, batch_size=self.batch_size, shuffle = True, pin_memory=True, num_workers=8)
             val_loader = DataLoader(val_subset, batch_size=self.batch_size, shuffle=False, pin_memory=True, num_workers=8)
             validation_loader = DataLoader(validation_subset, batch_size=self.batch_size, shuffle=False, num_workers=8)
+=======
+            val_subset2 = torch.utils.data.Subset(validation_dataset, val_idx)
+
+            train_loader = DataLoader(train_subset, batch_size=self.batch_size, shuffle = True, pin_memory=True, num_workers=8)
+            val_loader = DataLoader(val_subset, batch_size=self.batch_size, shuffle=False, pin_memory=True, num_workers=8)
+            validation_loader_2 = DataLoader(val_subset2, batch_size=self.batch_size, shuffle=False, num_workers=8)
+>>>>>>> main
 =======
             val_subset2 = torch.utils.data.Subset(validation_dataset, val_idx)
 
@@ -401,8 +429,12 @@ class Abstract(ABC):
                             gt = labels[:,col]
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
                             # print(pred.shape, gt.shape, pred, gt)
                             loss = loss + criterion(pred, gt) / 5
+=======
+                            loss = criterion(pred, gt) / 5
+>>>>>>> main
 =======
                             loss = criterion(pred, gt) / 5
 >>>>>>> main
@@ -476,6 +508,9 @@ class Abstract(ABC):
                 valid_loss = self.validate(criterion, val_loader, autocast)
                 validation_2 = self.validate(criterion, validation_loader_2, autocast)
 <<<<<<< HEAD
+<<<<<<< HEAD
+>>>>>>> main
+=======
 >>>>>>> main
 =======
 >>>>>>> main
@@ -497,7 +532,11 @@ class Abstract(ABC):
 
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
                 if early_stopping_counter >= 3:  # Stop if validation loss doesn't improve for 2 epochs
+=======
+                if early_stopping_counter >= 5:  # Stop if validation loss doesn't improve for 2 epochs
+>>>>>>> main
 =======
                 if early_stopping_counter >= 5:  # Stop if validation loss doesn't improve for 2 epochs
 >>>>>>> main
@@ -516,11 +555,14 @@ class Abstract(ABC):
                 os.rename(old_path, new_path)
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
             
             if fold == 0:
                 break
 
 =======
+=======
+>>>>>>> main
 =======
 >>>>>>> main
             if fold == 0:
