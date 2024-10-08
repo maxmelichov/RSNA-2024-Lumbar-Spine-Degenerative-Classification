@@ -35,3 +35,5 @@ weights/Axial_T2_axial_side_segmentation_1
 new_train_labels.csv
 detection_coordinates.csv
 submission_check.csv
+submission_check.csv
+detection_coordinates.csv
