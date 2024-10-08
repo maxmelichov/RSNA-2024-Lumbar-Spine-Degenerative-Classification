@@ -19,9 +19,13 @@ import matplotlib.pyplot as plt
 import re
 import warnings
 <<<<<<< HEAD
+<<<<<<< HEAD
 import cv2
 import glob
 from skimage import exposure  # Use skimage for CLAHE implementation
+=======
+import SimpleITK as sitk
+>>>>>>> main
 =======
 import SimpleITK as sitk
 >>>>>>> main
@@ -34,9 +38,13 @@ class CFG():
     Axial_shape = (152, 152)
     Sagittal_shape = (152, 152)
 <<<<<<< HEAD
+<<<<<<< HEAD
     channel_size_sagittal_t1 = 12
     channel_size_sagittal_t2 = 9
     channel_size_sagittal = channel_size_sagittal_t1 + channel_size_sagittal_t2
+=======
+    channel_size_sagittal = 20
+>>>>>>> main
 =======
     channel_size_sagittal = 20
 >>>>>>> main
@@ -82,6 +90,9 @@ transforms_sagittal = A.Compose([
 ])
 =======
 cross_reference = CrossReference()
+<<<<<<< HEAD
+>>>>>>> main
+=======
 >>>>>>> main
 
 transforms_axial = A.Compose([
@@ -96,7 +107,10 @@ transforms_axial = A.Compose([
     ], p=cfg.AUG_PROB),
 
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
+=======
+>>>>>>> main
     A.OneOf([
         A.OpticalDistortion(distort_limit=1.0),
         A.GridDistortion(num_steps=5, distort_limit=1.),
@@ -227,6 +241,9 @@ class CustomDataset(Dataset):
         return np.array(cropped_image)
 
 
+<<<<<<< HEAD
+>>>>>>> main
+=======
 >>>>>>> main
     @staticmethod
     def unpad_images_list(images_list, max_len): # need to check this function
@@ -517,6 +534,9 @@ class CustomDataset(Dataset):
                         image.crop((min_x, min_y - 50, min_x + margin, min_y + 102)))
 
         l = df_classes['path'].loc[ (df_classes['class_id'] == two_classes_category)].unique() # (df_classes['class_id'] == category) |
+<<<<<<< HEAD
+>>>>>>> main
+=======
 >>>>>>> main
 
         l = l.tolist()
@@ -535,6 +555,7 @@ class CustomDataset(Dataset):
             l = self.unpad_images_list(l, 3)
         
 <<<<<<< HEAD
+<<<<<<< HEAD
         def crop_axial_image(pixel_array):
             # Define the size of the crop
             crop_size = 384
@@ -548,6 +569,8 @@ class CustomDataset(Dataset):
             return cropped_image
 =======
 >>>>>>> main
+=======
+>>>>>>> main
         
         p = 0
         j = 3
@@ -556,8 +579,11 @@ class CustomDataset(Dataset):
             original_dicom = pydicom.dcmread(file).pixel_array
             original_dicom = original_dicom.clip(np.percentile(original_dicom, 1), np.percentile(original_dicom, 99))
 <<<<<<< HEAD
+<<<<<<< HEAD
             original_dicom = Image.fromarray(original_dicom).transpose(Image.FLIP_LEFT_RIGHT)
             original_dicom = np.array(original_dicom)
+=======
+>>>>>>> main
 =======
 >>>>>>> main
             bbox = cfg.DetectionInference.inference(original_dicom, 512, 512)
@@ -571,7 +597,11 @@ class CustomDataset(Dataset):
             # p += 1
             # Crop the center of the DICOM image
 <<<<<<< HEAD
+<<<<<<< HEAD
             cropped_left, cropped_middle, cropped_right = self.crop_axial_center(resized_pixel_array, bbox)
+=======
+            cropped_left, cropped_middle, cropped_right = crop_center(resized_pixel_array, bbox)
+>>>>>>> main
 =======
             cropped_left, cropped_middle, cropped_right = crop_center(resized_pixel_array, bbox)
 >>>>>>> main
@@ -709,6 +739,7 @@ class CustomDataset(Dataset):
                                         "L5", "L5-S1", df_classes_axial)
         
 <<<<<<< HEAD
+<<<<<<< HEAD
         # self.plot(sagittal_l1_l2[...,], x = 5, y = 6)
         # self.plot(sagittal_l2_l3[...,], x = 5, y = 6)
         # self.plot(sagittal_l3_l4[...,], x = 5, y = 6)
@@ -725,6 +756,8 @@ class CustomDataset(Dataset):
         flag_l4_l5 = False
         flag_l5_s1 = False
 =======
+=======
+>>>>>>> main
         if np.all(sagittal_l1_l2[:, :, -9:] == 0):
             sagittal_l1_l2 = sagittal_l1_l2[:, :, :-9]
         
@@ -733,6 +766,28 @@ class CustomDataset(Dataset):
         
         if np.all(sagittal_l3_l4[:, :, -9:] == 0):
             sagittal_l3_l4 = sagittal_l3_l4[:, :, :-9]
+<<<<<<< HEAD
+=======
+
+        if np.all(sagittal_l4_l5[:, :, -9:] == 0):
+            sagittal_l4_l5 = sagittal_l4_l5[:, :, :-9]
+        
+        if np.all(sagittal_l5_s1[:, :, -9:] == 0):
+            sagittal_l5_s1 = sagittal_l5_s1[:, :, :-9]
+
+
+        
+        # self.plot(sagittal_l1_l2[...,], x = 4, y = 5)
+        # self.plot(sagittal_l2_l3[...,], x = 4, y = 5)
+        # self.plot(sagittal_l3_l4[...,], x = 4, y = 5)
+        # self.plot(sagittal_l4_l5[...,], x = 4, y = 5)
+        # self.plot(sagittal_l5_s1[...,], x = 4, y = 5)
+        # self.plot(axial_l1_l2[...,],x= 3, y = 3)
+        # self.plot(axial_l2_l3[...,],x= 3, y = 3)
+        # self.plot(axial_l3_l4[...,],x= 3, y = 3)
+        # self.plot(axial_l4_l5[...,],x= 3, y = 3)
+        # self.plot(axial_l5_s1[...,],x= 3, y = 3)
+>>>>>>> main
 
         if np.all(sagittal_l4_l5[:, :, -9:] == 0):
             sagittal_l4_l5 = sagittal_l4_l5[:, :, :-9]
@@ -774,6 +829,7 @@ class CustomDataset(Dataset):
             axial_l5_s1 = self.transforms_axial(image=axial_l5_s1)['image']
 
 <<<<<<< HEAD
+<<<<<<< HEAD
         if flag_l1_l2:
             sagittal_l1_l2[:, :, -9:] = 0
         if flag_l2_l3:
@@ -785,6 +841,8 @@ class CustomDataset(Dataset):
         if flag_l5_s1:
             sagittal_l5_s1[:, :, -9:] = 0
 =======
+=======
+>>>>>>> main
         
         if sagittal_l1_l2.shape[2] < cfg.channel_size_sagittal+cfg.channel_size_axial:
             sagittal_l1_l2 = np.pad(sagittal_l1_l2, ((0, 0), (0, 0), (0, cfg.channel_size_sagittal+cfg.channel_size_axial - sagittal_l1_l2.shape[2])), mode='constant', constant_values=0)
@@ -807,6 +865,21 @@ class CustomDataset(Dataset):
         # self.plot(axial_l1_l2[...,])
         # self.plot(axial_l1_l2[...,])
         # self.plot(axial_l1_l2[...,])
+<<<<<<< HEAD
+=======
+
+
+        sagittal_l1_l2 = torch.tensor(sagittal_l1_l2).permute(2, 0, 1)
+        axial_l1_l2 = torch.tensor(axial_l1_l2).permute(2, 0, 1)
+        sagittal_l2_l3 = torch.tensor(sagittal_l2_l3).permute(2, 0, 1)
+        axial_l2_l3 = torch.tensor(axial_l2_l3).permute(2, 0, 1)
+        sagittal_l3_l4 = torch.tensor(sagittal_l3_l4).permute(2, 0, 1)
+        axial_l3_l4 = torch.tensor(axial_l3_l4).permute(2, 0, 1)
+        sagittal_l4_l5 = torch.tensor(sagittal_l4_l5).permute(2, 0, 1)
+        axial_l4_l5 = torch.tensor(axial_l4_l5).permute(2, 0, 1)
+        sagittal_l5_s1 = torch.tensor(sagittal_l5_s1).permute(2, 0, 1)
+        axial_l5_s1 = torch.tensor(axial_l5_s1).permute(2, 0, 1)
+>>>>>>> main
 
 
         sagittal_l1_l2 = torch.tensor(sagittal_l1_l2).permute(2, 0, 1)
