@@ -2,72 +2,7 @@ import torch
 
 import torch.nn as nn
 import timm
-from spacecutter.models import LogisticCumulativeLink
-from spacecutter.callbacks import AscensionCallback
 
-# class CustomRain(nn.Module):
-#     def __init__(self, num_classes=75, pretrained=True):
-#         super().__init__()
-#         self.stack_t1 = timm.create_model(
-#                                     "timm/edgenext_base.in21k_ft_in1k",
-#                                     pretrained=pretrained, 
-#                                     features_only=False,
-#                                     in_chans=3,
-#                                     num_classes=6,
-#                                     )
-#         self.stack_t2 = timm.create_model(
-#                                     "timm/edgenext_base.in21k_ft_in1k",
-#                                     pretrained=pretrained,
-#                                     features_only=False,
-#                                     in_chans=3,
-#                                     num_classes=3,
-#                                     )
-#         self.stack_axial = timm.create_model(
-#                                     "timm/edgenext_base.in21k_ft_in1k",
-#                                     pretrained=pretrained,
-#                                     features_only=False,
-#                                     in_chans=3,
-#                                     num_classes=6,
-#                                     )
-
-#         # self.fc1 = nn.Linear(128 * 3, 6)
-#         # self.fc2 = nn.Linear(128 * 3, 3)
-
-#     def forward(self, axial, sagittal):
-#         t1_1 = sagittal[:, :3, :, :]
-#         t1_2 = sagittal[:, 3:6, :, :]
-#         t1_3 = sagittal[:, 6:9, :, :]
-
-#         t2_1 = sagittal[:, 9:12, :, :]
-#         t2_2 = sagittal[:, 12:15, :, :]
-#         t2_3 = sagittal[:, 15:18, :, :]
-
-
-        
-
-#         x_t1_1 = self.stack_t1(t1_1) * 0.33
-#         x_t1_2 = self.stack_t1(t1_2) * 0.33
-#         x_t1_3 = self.stack_t1(t1_3) * 0.33
-
-#         x_t2_1 = self.stack_t2(t2_1) * 0.33
-#         x_t2_2 = self.stack_t2(t2_2) * 0.33
-#         x_t2_3 = self.stack_t2(t2_3) * 0.33
-
-#         x_ss = self.stack_axial(axial)
-        
-#         x_nfn = x_t1_1 + x_t1_2 + x_t1_3
-#         x_scs = x_t2_1 + x_t2_2 + x_t2_3
-#         # x_nfn = self.fc1(x_nfn)
-#         # x_scs = self.fc2(x_scs)
-
-        
-        
-#         assert x_scs.shape[1]==3, f"Expected 3 classes, got {x_scs}"
-#         assert x_nfn.shape[1]==6, f"Expected 6 classes, got {x_nfn}"
-#         assert x_ss.shape[1]==6, f"Expected 6 classes, got {x_ss}"
-#         x = torch.cat([x_scs, x_nfn, x_ss], dim=1)
-#         return x
-    
 
 class CustomRain(nn.Module):
     def __init__(self, num_classes=75, pretrained=True):
@@ -203,11 +138,7 @@ class CustomRain(nn.Module):
         x_ss_left = self.ss_left(SS_left)
         x_ss_right = self.ss_right(SS_right)
 
-
-        # self._ascension_callback()
         x = torch.cat([x_scs, x_nfn_left, x_nfn_right, x_ss_left, x_ss_right], dim=1)
-        
-        # # Apply the ascension callback for cutpoint clipping
         
 
         # Final output (15 ordinal classes and combined output)

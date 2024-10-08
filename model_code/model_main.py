@@ -5,7 +5,7 @@ from pathlib import Path
 from tqdm import tqdm
 import inspect
 from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
-from torch.utils.data import DataLoader, WeightedRandomSampler
+from torch.utils.data import DataLoader
 import os
 from pathlib import Path
 import inspect
@@ -19,96 +19,12 @@ import matplotlib.pyplot as plt
 from typing import Any
 import pandas as pd
 from sklearn.model_selection import KFold
-from utils import AverageMeter, FocalLossWithWeights, FocalLoss
-from spacecutter.losses import CumulativeLinkLoss
+from utils import AverageMeter
 from data_loader import data_loader
 from custom_model import CustomRain
-from typing import Optional
 import os
-import torch.nn.functional as F
 os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
 os.environ["TORCH_USE_CUDA_DSA"] = "1"
-
-def cumulative_link_loss(y_pred: torch.Tensor, 
-                         y_true: torch.Tensor,
-                         reduction: str = 'mean',
-                         class_weights: Optional[np.ndarray] = [1.0, 2.0, 4.0],
-                         ignore_index: Optional[int] = -100,
-                         criterion = CumulativeLinkLoss()
-                         ) -> torch.Tensor:
-    """
-    Calculates the negative log likelihood using the logistic cumulative link
-    function with an optional ignore index.
-
-    Parameters
-    ----------
-    y_pred : torch.Tensor, [batch_size, num_classes]
-        Predicted target class probabilities. float dtype.
-    y_true : torch.Tensor, [batch_size]
-        True target classes. long dtype.
-    reduction : str
-        Method for reducing the loss. Options include 'mean', 'none', and 'sum'.
-    class_weights : np.ndarray, [num_classes] optional (default=[1.0, 2.0, 4.0])
-        An array of weights for each class. If included, then for each sample,
-        look up the true class and multiply that sample's loss by the weight in
-        this array.
-    ignore_index : int, optional (default=-100)
-        Specifies a target value that should be ignored during loss computation.
-
-    Returns
-    -------
-    loss: torch.Tensor
-    """
-    eps = 1e-15
-    
-    # Handle ignore_index by creating a mask
-    if ignore_index is not None:
-        valid_mask = (y_true != ignore_index)
-        y_true = y_true[valid_mask]
-        y_pred = y_pred[valid_mask]
-    else:
-        valid_mask = torch.ones_like(y_true, dtype=torch.bool)
-
-    # Check if any valid targets remain after masking
-    if y_true.numel() == 0:
-        print("No valid targets remain after ignoring the specified index.")
-        return torch.tensor(0.0, requires_grad=True, device=y_pred.device)
-
-    # Ensure y_true is 2D to match the requirements of torch.gather
-    y_true = y_true.unsqueeze(-1) # Shape: [batch_size, 1]
-    loss = criterion(y_pred, y_true)
-    return loss
-
-def ordinal_cross_entropy(output, target, class_weights=None, ignore_index=-100):
-    """
-    Args:
-        output (Tensor): The model predictions of shape [batch_size, num_classes].
-        target (Tensor): The true labels (ordinal) of shape [batch_size].
-        class_weights (Tensor, optional): Weighting for each class.
-        ignore_index (int, optional): Specifies a target value that should be ignored.
-
-    Returns:
-        loss (Tensor): Scalar loss value excluding the ignored indices.
-    """
-
-
-    # Create a mask for the valid indices (where target is not equal to ignore_index)
-    valid_mask = (target != ignore_index)
-
-    # Apply the mask to filter the outputs and targets
-    filtered_output = output[valid_mask]
-    filtered_target = target[valid_mask]
-
-    # If there are no valid indices, return zero loss
-    if filtered_output.size(0) == 0:
-        return torch.tensor(0.0, requires_grad=True, device=output.device)
-
-    # Convert filtered target to one-hot representation
-    target_one_hot = F.one_hot(filtered_target, num_classes=3).float()
-    loss = nn.CrossEntropyLoss(weight=class_weights)(filtered_output.squeeze() , target_one_hot.squeeze())
-    # loss = CumulativeLinkLoss(class_weights=class_weights)(filtered_output, filtered_target)
-    return loss
-
 
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -370,19 +286,13 @@ class Abstract(ABC):
 
         weights = torch.tensor([1.0, 2.0, 4.0], dtype= torch.float32)
         criterion = nn.CrossEntropyLoss(weight=weights.to(device))
-        Cumulative = CumulativeLinkLoss(class_weights=weights.to(device))
 
         criterion = criterion.cuda()
-        # loss_fn, weights = [], []
-        # for loss_name, weight in {criterion:1}.items():
-        #     loss_fn.append(loss_name.cuda())
-        #     weights.append(weight)
-        # summary_writer = SummaryWriter(self.name + "_logs" + str(time.strftime("%Y.%m.%d.%H.%M.%S", time.localtime())))
         train_losses = []
-        
-        train_labels = r"F:\Projects\Kaggle\RSNA-2024-Lumbar-Spine-Degenerative-Classification\csv\train_series_descriptions_with_paths.csv"
-        train_path = r"F:\Projects\Kaggle\RSNA-2024-Lumbar-Spine-Degenerative-Classification\train.csv"
-        train_descriptions = r"F:\Projects\Kaggle\RSNA-2024-Lumbar-Spine-Degenerative-Classification\train_series_descriptions.csv"
+        project_path = os.getcwd()
+        train_labels = os.path.join(project_path, r"csv\train_series_descriptions_with_paths.csv")
+        train_path = os.path.join(project_path, r"train.csv")
+        train_descriptions = os.path.join(project_path, r"train_series_descriptions.csv")
         train_dataset = data_loader(train_path, train_labels, train_descriptions)
         validation_dataset = data_loader(train_path, train_labels, train_descriptions, mode = 'val')
         train_df = pd.read_csv(train_labels)
@@ -390,7 +300,6 @@ class Abstract(ABC):
         skf = KFold(n_splits=5, shuffle=True, random_state=42)
         autocast = torch.cuda.amp.autocast(enabled=True, dtype=torch.bfloat16)
         scaler = torch.cuda.amp.GradScaler(enabled=True)
-        ignore_index = -100
         for fold, (train_idx, val_idx) in enumerate(skf.split(range(len(primary_labels)))):
             print(f"Fold: {fold + 1}")
             best_valid_loss = np.inf
@@ -517,14 +426,13 @@ class Abstract(ABC):
                 if early_stopping_counter >= 3:  # Stop if validation loss doesn't improve for 2 epochs
                     print("Early stopping due to overfitting")
                     break
-                save_path = r"F:\Projects\Kaggle\RSNA-2024-Lumbar-Spine-Degenerative-Classification"
                 if self.save_wieghts and (early_stopping_counter == 0):
-                    self.save_model(self.model, os.path.join(save_path ,self.name + "_best_validation.pt"))
+                    self.save_model(self.model, os.path.join(project_path ,self.name + "_best_validation.pt"))
             
             
             if self.save_wieghts:
-                old_path = os.path.join(save_path, self.name + "_best_validation.pt")
-                new_path = os.path.join(save_path, self.name + f"_{self.Validation_loss}_fold_{fold+1}.pt")
+                old_path = os.path.join(project_path, self.name + "_best_validation.pt")
+                new_path = os.path.join(project_path, self.name + f"_{self.Validation_loss}_fold_{fold+1}.pt")
                 os.rename(old_path, new_path)
             
             if fold == 0:

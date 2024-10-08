@@ -3,15 +3,15 @@ import numpy as np
 import os
 import pydicom
 import sys
-sys.path.insert(0, r'F:\Projects\Kaggle\RSNA-2024-Lumbar-Spine-Degenerative-Classification\preprocessing')
+from pathlib import Path
+project_path = Path(__file__).resolve().parent.parent
+preprocessing_path = project_path / 'preprocessing'
+sys.path.insert(0, str(preprocessing_path))
 from segmantation_inference import SegmentaionInference, label_dict_clean
 import shutil
 import cv2
-from pathlib import Path
-from PIL import Image
 import pandas as pd
 from typing import Union
-import matplotlib.pyplot as plt
 
 
 
@@ -47,7 +47,7 @@ class CrossReferenceAxial:
         sorted_files = [dicom_files[i] for i in idx]
         return {"array": CrossReferenceAxial._convert_to_8bit(array), "positions": ipp, "orientations": iop, "pixel_spacing": np.asarray(dicoms[0].PixelSpacing).astype("float"), "sorted_files": sorted_files}
     
-    def is_line_through_plane(x1, y1, x2, y2, x_min, y_min, width, height):
+    def _is_line_through_plane(x1, y1, x2, y2, x_min, y_min, width, height):
         # Check if the line is within the plane
         def point_to_line_distance(x, y, x1, y1, x2, y2):
             # Calculate the numerator of the distance formula
@@ -82,7 +82,7 @@ class CrossReferenceAxial:
                 continue
             for box in boxes:
                 x_min, y_min, weight, height = box
-                if CrossReferenceAxial.is_line_through_plane(x_1, y_1, x_2, y_2, x_min, y_min, weight, height):
+                if CrossReferenceAxial._is_line_through_plane(x_1, y_1, x_2, y_2, x_min, y_min, weight, height):
                     classes.append(cls)
                     # print(y_min, y, y_max, box)
                     break  # If y is within this class, no need to check further boxes for this class
@@ -152,7 +152,7 @@ class CrossReferenceAxial:
         
         return (u >= 0) and (v >= 0) and (u <= 1) and (v <= 1)
 
-    def distance_point_to_segment(point, v1, v2):
+    def _distance_point_to_segment(point, v1, v2):
         # Compute the distance from a point to a line segment
         v1, v2, point = np.array(v1), np.array(v2), np.array(point)
         segment_vector = v2 - v1
@@ -167,7 +167,7 @@ class CrossReferenceAxial:
         
         return np.linalg.norm(projection - point)
 
-    def point_to_square_distance(self, point, square_vertices):
+    def _point_to_square_distance(self, point, square_vertices):
         # Ensure the vertices are numpy arrays
         square_vertices = [np.array(v) for v in square_vertices]
         
@@ -188,7 +188,7 @@ class CrossReferenceAxial:
         
         return np.inf
     
-    def find_world_point_on_sag(self, sag_Oxyz, point_xyz, orient_xyz_xyz, axial_height, axial_width,
+    def _find_world_point_on_sag(self, sag_Oxyz, point_xyz, orient_xyz_xyz, axial_height, axial_width,
                             axial_sp_X, axial_sp_Y, sag_sp_X, sag_sp_Y):
         coord_diff = (point_xyz - sag_Oxyz)
         x_1 = np.round(coord_diff[1] / sag_sp_X).astype(int)
@@ -248,7 +248,7 @@ class CrossReferenceAxial:
         for ax_t2 in axs_t2:
             sag_y_coord_to_axial_slice = {}
             for i, (ax_t2_pos, ax_t2_ori, ax_t2_slice) in enumerate(zip(ax_t2["positions"], ax_t2["orientations"], ax_t2["array"])): 
-                line_ = self.find_world_point_on_sag(sag_t["positions"][len(sag_t["array"]) // 2], ax_t2_pos, ax_t2_ori, *ax_t2_slice.shape,
+                line_ = self._find_world_point_on_sag(sag_t["positions"][len(sag_t["array"]) // 2], ax_t2_pos, ax_t2_ori, *ax_t2_slice.shape,
                                     *ax_t2["pixel_spacing"], *sag_t["pixel_spacing"])
                 sag_y_coord_to_axial_slice[i] = line_
 

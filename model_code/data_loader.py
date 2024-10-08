@@ -8,7 +8,9 @@ import pydicom
 import os
 from PIL import Image
 import sys
-sys.path.insert(0, r'F:\Projects\Kaggle\RSNA-2024-Lumbar-Spine-Degenerative-Classification\preprocessing')
+project_path = Path(__file__).resolve().parent.parent
+preprocessing_path = project_path / 'preprocessing'
+sys.path.insert(0, str(preprocessing_path))
 from segmantation_inference import SegmentaionInference
 from Cross_Reference_Axial import CrossReferenceAxial
 from Cross_Reference_Sagittal import CrossReferenceSagittal
@@ -92,27 +94,6 @@ transforms_axial = A.Compose([
     A.Normalize(mean=[0.485], std=[0.229])
 ])
 
-# transforms_sagittal = A.Compose([
-#     A.Resize(cfg.Sagittal_shape[0], cfg.Sagittal_shape[1]),
-#     A.RandomBrightnessContrast(brightness_limit=(-0.2, 0.2), contrast_limit=(-0.2, 0.2), p=cfg.AUG_PROB),
-#     A.Perspective(p=0.5),
-#     A.OneOf([
-#         A.MotionBlur(blur_limit=5),
-#         A.MedianBlur(blur_limit=5),
-#         A.GaussianBlur(blur_limit=5),
-#         A.GaussNoise(var_limit=(5.0, 30.0)),
-#     ], p=cfg.AUG_PROB),
-
-#     # A.OneOf([
-#     #     A.OpticalDistortion(distort_limit=1.0),
-#     #     A.GridDistortion(num_steps=5, distort_limit=1.),
-#     #     A.ElasticTransform(alpha=3),
-#     # ], p=0.5),
-
-#     # A.ShiftScaleRotate(shift_limit=0.1, scale_limit=0.1, rotate_limit=15, border_mode=0, p=cfg.AUG_PROB),
-#     A.CoarseDropout(max_holes=16, max_height=16, max_width=16, min_holes=1, min_height=4, min_width=4, p=cfg.AUG_PROB),
-#     A.Normalize(mean=0.5, std=0.5)
-# ])
 
 transforms_val = A.Compose([
     A.Normalize(mean=[0.485], std=[0.229])
