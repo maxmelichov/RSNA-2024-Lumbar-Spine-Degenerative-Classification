@@ -52,6 +52,25 @@ class FocalLoss(nn.Module):
         F_loss = self.alpha * (1 - pt) ** self.gamma * BCE_loss
         return F_loss.mean()
 
+# class FocalLoss(nn.Module):
+#     def __init__(self, alpha=[0.25, 0.5, 0.75], gamma=2, reduction='mean'):
+#         super(FocalLoss, self).__init__()
+#         self.alpha = torch.tensor(alpha).to(device)
+#         self.gamma = gamma
+#         self.reduction = reduction
+
+#     def forward(self, inputs, targets):
+#         BCE_loss = F.cross_entropy(inputs, targets, reduction='none')
+#         pt = torch.exp(-BCE_loss)  # pt is the probability of the correct class
+#         focal_loss = self.alpha[targets] * (1 - pt) ** self.gamma * BCE_loss
+
+#         if self.reduction == 'mean':
+#             return focal_loss.mean()
+#         elif self.reduction == 'sum':
+#             return focal_loss.sum()
+#         else:
+#             return focal_loss
+
 
 class FocalLossWithWeights(nn.Module):
     def __init__(self, gamma=2.0, alpha=0.25):
@@ -126,8 +145,7 @@ class SevereLoss(_Loss):
             # Exact max; this works too
             y_pred_max = y_spinal_prob[:, 2, :].amax(dim=1)
 
-        criterion = torch.nn.BCEWithLogitsLoss(reduction='none')
-        loss_max = criterion(y_pred_max, y_max, )
+        loss_max = F.binary_cross_entropy(y_pred_max, y_max, reduction='none')
         wloss_sums.append((w_max * loss_max).sum())
 
         # See below about these numbers

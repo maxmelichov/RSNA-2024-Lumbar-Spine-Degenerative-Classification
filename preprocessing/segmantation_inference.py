@@ -41,7 +41,8 @@ label_dict = {1 : '1: L5', 2 : '2: L4', 3 : '3: L3', 4 : '4: L2', 5 : '5: L1', 6
              }
 
 
-classes_of_interest = [1, 2, 3, 4, 5, 11, 12, 13, 14, 15]
+# classes_of_interest = [1, 2, 3, 4, 5, 11, 12, 13, 14, 15]
+classes_of_interest = [11, 12, 13, 14, 15]
 # classes_of_interest = [1, 2, 3, 4, 5]
 
 class SegmentaionInference:
@@ -140,7 +141,11 @@ class SegmentaionInference:
                     class_bboxes[class_id].append((-1, -1, -1, -1))  # Placeholder for classes not present in the mask
         scaled_bboxes = self.scale_bboxes(class_bboxes, self.original_image.shape , (256, 256))
         return scaled_bboxes
-    
+    def inference_with_prediction(self, dcm_path):
+        pred = self.predict_mask(dcm_path)
+        bboxes = self.get_class_bboxes(pred, classes_of_interest)
+        return pred, bboxes
+
     def inference(self, dcm_path):
         pred = self.predict_mask(dcm_path)
         bboxes = self.get_class_bboxes(pred, classes_of_interest)

@@ -52,11 +52,13 @@ class CrossReference:
             if boxes == [(-1, -1, -1, -1)]:
                 continue
             for box in boxes:
-                _, y_min, height, _ = box
+                _, y_min, _, height = box
                 y_max = y_min + height
                 if y_min <= y <= y_max:
                     classes.append(cls)
+                    # print(y_min, y, y_max, box)
                     break  # If y is within this class, no need to check further boxes for this class
+            
         return classes if classes else -1
     
 
@@ -151,7 +153,7 @@ class CrossReference:
                         os.makedirs(save_path, exist_ok=True)
                         shutil.copyfile(ax_t2["sorted_files"][i], os.path.join(save_path, file_name))
     
-    def _infer_axis_from_study_for_test(self, sag_t: dict, ax_t2: dict) -> pd.DataFrame:
+    def _infer_axis_from_study_for_test(self, sag_t: dict, axs_t2: dict) -> pd.DataFrame:
         classes_df = pd.DataFrame(columns=["path", "class_id"])
         top_left_hand_corner_sag_t2 = sag_t["positions"][len(sag_t["array"]) // 2]
         sag_y_axis_to_pixel_space = [top_left_hand_corner_sag_t2[2]]
@@ -159,44 +161,48 @@ class CrossReference:
         while len(sag_y_axis_to_pixel_space) < sag_t["array"].shape[1]: 
             sag_y_axis_to_pixel_space.append(sag_y_axis_to_pixel_space[-1] - sag_t["pixel_spacing"][1])
 
-        sag_y_coord_to_axial_slice = {}
-        for ax_t2_slice, ax_t2_pos in zip(ax_t2["array"], ax_t2["positions"]):
-            diffs = np.abs(np.asarray(sag_y_axis_to_pixel_space) - ax_t2_pos[2])
-            sag_y_coord = np.argmin(diffs)
-            sag_y_coord_to_axial_slice[sag_y_coord] = ax_t2_slice
+        for ax_t2 in axs_t2:
+            sag_y_coord_to_axial_slice = {}
+            for ax_t2_slice, ax_t2_pos in zip(ax_t2["array"], ax_t2["positions"]):
+                diffs = np.abs(np.asarray(sag_y_axis_to_pixel_space) - ax_t2_pos[2])
+                sag_y_coord = np.argmin(diffs)
+                sag_y_coord_to_axial_slice[sag_y_coord] = ax_t2_slice
 
-        bboxes = self.segmentation.inference(sag_t["sorted_files"][len(sag_t["sorted_files"]) // 2])
-        for i, y in enumerate([*sag_y_coord_to_axial_slice]):
-            classes = CrossReference._find_classes(y, bboxes)
-            if classes != -1:
-                for cls in classes:
-                    classes_df.loc[len(classes_df)] = [ax_t2["sorted_files"][i], label_dict_clean[cls]]
+
+            bboxes = self.segmentation.inference(sag_t["sorted_files"][len(sag_t["sorted_files"]) // 2])
+
+            classes_df = pd.DataFrame(columns=["path", "class_id"])
+            for i, y in enumerate([*sag_y_coord_to_axial_slice]):
+                classes = CrossReference._find_classes(y, bboxes)
+                if classes != -1:
+                    for cls in classes:
+                        classes_df.loc[len(classes_df)] = [ax_t2["sorted_files"][i], label_dict_clean[cls]]
                 
         return classes_df
 
 
     
     def get_cross_reference_for_Axial(self, study: pd.DataFrame, mode = "train") -> Union[None, pd.DataFrame]:
-        sag_t1, sag_t2, ax_t2 = None, None, []
+        sag_t1, sag_t2, axs_t2 = None, None, []
         for row in study.itertuples():
             if row.series_description == "Sagittal T2/STIR":
                 sag_t2 = CrossReference._load_dicom_stack(os.path.join(self.image_dir, str(row.study_id), str(row.series_id)), plane="sagittal")
             elif row.series_description == "Sagittal T1":
                 sag_t1 = CrossReference._load_dicom_stack(os.path.join(self.image_dir, str(row.study_id), str(row.series_id)), plane="sagittal")
             elif row.series_description == "Axial T2":
-                ax_t2 = CrossReference._load_dicom_stack(os.path.join(self.image_dir, str(row.study_id), str(row.series_id)), plane="axial", reverse_sort=True)
+                axs_t2.append(CrossReference._load_dicom_stack(os.path.join(self.image_dir, str(row.study_id), str(row.series_id)), plane="axial", reverse_sort=True))
         if mode == "train":
-            if sag_t2 and ax_t2:
-                self._infer_axis_from_study(sag_t2, ax_t2)
-            elif sag_t1 and ax_t2:
-                self._infer_axis_from_study(sag_t1, ax_t2)
+            if sag_t2 and axs_t2:
+                self._infer_axis_from_study(sag_t2, axs_t2)
+            elif sag_t1 and axs_t2:
+                self._infer_axis_from_study(sag_t1, axs_t2)
             else:
                 print("Could not find Sagittal T2/STIR or Sagittal T1 and Axial T2 for this study. Study ID:", study.study_id)
         else:
-            if sag_t2 and ax_t2:
-                return self._infer_axis_from_study_for_test(sag_t2, ax_t2)
-            elif sag_t1 and ax_t2:
-                return self._infer_axis_from_study_for_test(sag_t1, ax_t2)
+            if sag_t2 and axs_t2:
+                return self._infer_axis_from_study_for_test(sag_t2, axs_t2)
+            elif sag_t1 and axs_t2:
+                return self._infer_axis_from_study_for_test(sag_t1, axs_t2)
             else:
                 print("Could not find Sagittal T2/STIR or Sagittal T1 and Axial T2 for this study. Study ID:", study.study_id)
 
